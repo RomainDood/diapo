@@ -11,7 +11,7 @@
   "effectTs": {
     "url": "https://github.com/Effect-TS/effect.git",
     "requestedRef": "main",
-    "resolvedSha": "",
+    "resolvedSha": "addeaea0b0abe0dc24ca1d4d0fd194a0e458be70",
     "path": ".references/effect-ts"
   }
 }
