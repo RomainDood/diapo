@@ -1,0 +1,80 @@
+import { inject, Injector, runInInjectionContext } from './host/craft-compat';
+import { isGenerator, runCraftGenerator } from './craft-generator-runtime';
+
+const INVALID_YIELD_ERROR_MESSAGE =
+  'craftUse(...) generators can only yield craft primitives, exposed dependency helpers, or craftService dependencies.';
+const ON_APP_START_ERROR_MESSAGE =
+  'craftUse(...) does not support onAppStart(...): it is only available inside a craftService factory.';
+const GUARD_AWAIT_ERROR_MESSAGE =
+  'craftUse(...) does not support craftUntilSettled(...)/craftUntilDefined(...): they are only available inside route guards.';
+
+/**
+ * Drives any craft generator synchronously outside a generator host and
+ * returns its result — the imperative counterpart of `yield*`.
+ *
+ * Its main use is consuming a craft primitive (`state`, `query`, `mutation`,
+ * `asyncProcess`, `queryParams`) outside a generator host. Like `yield*`, it
+ * resolves to the primitive reference itself:
+ *
+ * ```ts
+ * const users = craftUse(query('users', { loader: ... }));
+ * const counter = craftUse(state('counter', 0));
+ * ```
+ *
+ * It also accepts a `craftGen` invocation, an inline generator, or an
+ * argument-less generator function. Dependency yields are resolved through the
+ * ambient injection context when one is available; a `CraftGenShortCircuit`
+ * thrown by a composed `craftGen` propagates unchanged.
+ *
+ * A generator is single-use: passing the same invocation to `craftUse` twice
+ * (or after a `yield*`) drives an exhausted generator and returns `undefined`.
+ */
+export function craftUse<Yielded, Output>(
+  invocation: Generator<Yielded, Output, unknown>,
+): Output;
+export function craftUse<Yielded, Output>(
+  invocation: Generator<Yielded, Output, unknown> | undefined,
+): Output | undefined;
+export function craftUse<Yielded, Output>(
+  factory: () => Generator<Yielded, Output, unknown>,
+): Output;
+export function craftUse<Value>(value: Value): Value;
+export function craftUse(
+  input:
+    | Generator<unknown, unknown, unknown>
+    | undefined
+    | (() => Generator<unknown, unknown, unknown>)
+    | unknown,
+): unknown {
+  if (input === undefined) return undefined;
+  if (!isGenerator(input) && typeof input !== 'function') return input;
+  const iterator = isGenerator(input) ? input : input();
+
+  // Capture the ambient injector when available. Driving a trivial primitive
+  // generator needs none, so `craftUse` stays usable outside an injection
+  // context (leniency aligned with the primitives' own eager capture).
+  let injector: Injector | undefined;
+  try {
+    injector = inject(Injector);
+  } catch {
+    injector = undefined;
+  }
+
+  // A generator may yield a dependency request whose resolver does not need
+  // Angular DI. Keep that valid outside an injection context while still
+  // giving the runtime an injector for wrapper lookup and resolver shape.
+  const runtimeInjector = injector ?? Injector.create({ providers: [] });
+
+  const drive = () =>
+    runCraftGenerator({
+      iterator,
+      injector: runtimeInjector,
+      hostScope: 'function',
+      invalidYieldErrorMessage: INVALID_YIELD_ERROR_MESSAGE,
+      multipleAppStartErrorMessage: ON_APP_START_ERROR_MESSAGE,
+      onAppStartNotSupportedErrorMessage: ON_APP_START_ERROR_MESSAGE,
+      guardAwaitNotSupportedErrorMessage: GUARD_AWAIT_ERROR_MESSAGE,
+    }).value;
+
+  return injector ? runInInjectionContext(injector, drive) : drive();
+}

@@ -1,0 +1,65 @@
+{
+  "name": "@craft-ts/core",
+  "version": "0.8.3",
+  "description": "Type-safe reactive TypeScript — signals, generators, typed errors. Declare. Yield. Derive. Compile — no surprises",
+  "author": "Romain Geffrault",
+  "license": "MIT",
+  "homepage": "https://craft-ts.github.io/craft/",
+  "bugs": {
+    "url": "https://github.com/craft-ts/craft-ts/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/craft-ts/craft-ts.git"
+  },
+  "keywords": [
+    "state management",
+    "signals",
+    "reactive",
+    "typescript",
+    "state",
+    "store",
+    "generators",
+    "typed errors",
+    "craft-ts",
+    "mcp",
+    "llms.txt"
+  ],
+  "peerDependencies": {
+    "effect": ">=4.0.0-rc.112 || >=4.0.0",
+    "rxjs": "^7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "peerDependenciesMeta": {
+    "effect": {
+      "optional": true
+    },
+    "rxjs": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "alien-signals": "^3.2.1"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./dev-tools": {
+      "types": "./src/lib/dev-tools.d.ts",
+      "default": "./src/lib/dev-tools.js"
+    }
+  }
+}

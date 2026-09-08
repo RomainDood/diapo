@@ -1,0 +1,75 @@
+{
+  "name": "dev-tools",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/dev-tools/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/dev-tools",
+        "main": "libs/dev-tools/src/index.ts",
+        "tsConfig": "libs/dev-tools/tsconfig.lib.json",
+        "assets": [
+          "LICENSE",
+          "libs/dev-tools/*.md",
+          "libs/dev-tools/generators.json",
+          "libs/dev-tools/.npmignore",
+          {
+            "input": "libs/dev-tools/src/eslint",
+            "glob": "**/*.mjs",
+            "output": "src/eslint"
+          },
+          {
+            "input": "libs/dev-tools/src/eslint-rules",
+            "glob": "**/*.cjs",
+            "output": "src/eslint-rules"
+          },
+          {
+            "input": "libs/dev-tools/src/eslint-rules",
+            "glob": "**/*.d.cts",
+            "output": "src/eslint-rules"
+          },
+          {
+            "input": "libs/dev-tools/src",
+            "glob": "tsconfig.codemod.json",
+            "output": "src"
+          },
+          {
+            "input": "libs/dev-tools/src/generators",
+            "glob": "**/*.json",
+            "output": "src/generators"
+          },
+          {
+            "input": "libs/dev-tools/src/scripts",
+            "glob": "**/*.ts",
+            "ignore": ["**/*.spec.ts", "**/*.test.ts", "**/tests/**"],
+            "output": "src/scripts"
+          }
+        ]
+      }
+    },
+    "nx-release-publish": {
+      "options": {
+        "packageRoot": "dist/{projectRoot}"
+      }
+    },
+    "typecheck-spec": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p libs/dev-tools/tsconfig.spec.json --noEmit --pretty false"
+      },
+      "inputs": [
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.spec.json",
+        "{projectRoot}/src/**/*.ts",
+        "{projectRoot}/tests/**/*.ts",
+        "{projectRoot}/vitest.config.mts"
+      ],
+      "cache": true
+    }
+  }
+}

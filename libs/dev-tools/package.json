@@ -1,0 +1,124 @@
+{
+  "name": "@craft-ts/dev-tools",
+  "version": "0.8.3",
+  "description": "Development tools for craft-ts: ESLint configs, ESLint rules, and codemods",
+  "author": "Romain Geffrault",
+  "license": "MIT",
+  "homepage": "https://craft-ts.github.io/craft/",
+  "bugs": {
+    "url": "https://github.com/craft-ts/craft-ts/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/craft-ts/craft-ts.git"
+  },
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./eslint-rules": {
+      "types": "./src/eslint-rules/index.d.cts",
+      "default": "./src/eslint-rules/index.cjs"
+    },
+    "./style-report": {
+      "types": "./src/scripts/style-report.d.ts",
+      "default": "./src/scripts/style-report.js"
+    },
+    "./template-migration": {
+      "types": "./src/template-migration.d.ts",
+      "default": "./src/template-migration.js"
+    },
+    "./package.json": "./package.json",
+    "./testing": {
+      "types": "./src/testing.d.ts",
+      "default": "./src/testing.js"
+    },
+    "./dependency-graph": {
+      "types": "./src/scripts/dependency-graph.d.ts",
+      "default": "./src/scripts/dependency-graph.js"
+    },
+    "./architecture-graph": {
+      "types": "./src/scripts/architecture-graph.d.ts",
+      "default": "./src/scripts/architecture-graph.js"
+    }
+  },
+  "generators": "./generators.json",
+  "schematics": "./generators.json",
+  "bin": {
+    "craft": "./src/bin/craft.js",
+    "craft-brand": "./src/bin/craft-brand.js",
+    "craft-migrate": "./src/bin/craft-migrate.js",
+    "craft-migrate-primitives": "./src/bin/craft-migrate-primitives.js",
+    "craft-migrate-services": "./src/bin/craft-migrate-services.js",
+    "craft-migrate-routes": "./src/bin/craft-migrate-routes.js",
+    "craft-migrate-components": "./src/bin/craft-migrate-components.js",
+    "craft-migrate-architecture": "./src/bin/craft-migrate-architecture.js",
+    "craft-migrate-template": "./src/bin/craft-migrate-template.js",
+    "craft-graph": "./src/bin/craft-graph.js",
+    "craft-architecture-check": "./src/bin/craft-architecture-check.js"
+  },
+  "files": [
+    "generators.json",
+    "src/**/*",
+    "!src/**/*.ts",
+    "src/**/*.d.ts",
+    "README.md",
+    "!src/**/*.spec.ts",
+    "!src/**/*.spec.js",
+    "!src/**/*.spec.d.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.js",
+    "!src/**/*.test.d.ts",
+    "!tests/**"
+  ],
+  "dependencies": {
+    "@nx/devkit": "^22.3.1",
+    "tslib": "^2.3.0",
+    "ts-morph": "^24.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "7.0.2"
+  },
+  "peerDependencies": {
+    "@angular-eslint/eslint-plugin": ">=21.0.0",
+    "@nx/angular": ">=21.0.0 <24.0.0",
+    "@schematics/angular": ">=20.0.0 <23.0.0",
+    "@typescript-eslint/eslint-plugin": ">=8.0.0",
+    "eslint": ">=9.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@angular-eslint/eslint-plugin": {
+      "optional": true
+    },
+    "@nx/angular": {
+      "optional": true
+    },
+    "@schematics/angular": {
+      "optional": true
+    },
+    "@typescript-eslint/eslint-plugin": {
+      "optional": true
+    },
+    "eslint": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "craft-ts",
+    "angular",
+    "codemod",
+    "eslint",
+    "eslint-config",
+    "eslint-plugin",
+    "typescript"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@craft-ts/log-mcp",
+  "version": "0.8.3",
+  "description": "MCP reader for CraftTS local JSONL logs",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.d.ts",
+    "!dist/**/*.spec.js.map"
+  ],
+  "bin": {
+    "craft-ts-log-mcp": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && node dist/main.js",
+    "test": "vitest run --config vitest.config.mts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "typescript": "6.0.3",
+    "vitest": "^4.0.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

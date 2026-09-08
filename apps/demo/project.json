@@ -1,0 +1,132 @@
+{
+  "name": "demo",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "prefix": "app",
+  "sourceRoot": "apps/demo/src",
+  "tags": [],
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-local-types"],
+      "options": {
+        "cwd": "apps/demo",
+        "command": "node ../../tools/demo-typecheck.mjs"
+      },
+      "inputs": [
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.app.json",
+        "{projectRoot}/src/**/*.ts",
+        "!{projectRoot}/src/**/*.spec.ts",
+        "!{projectRoot}/src/**/*.test.ts"
+      ],
+      "cache": true
+    },
+    "build-local-types": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node_modules/.bin/tsc -b libs/core/tsconfig.lib.json libs/component/tsconfig.lib.json libs/style/tsconfig.lib.json libs/style-testing/tsconfig.lib.json --pretty false"
+      },
+      "cache": false
+    },
+    "typecheck-spec": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/demo",
+        "command": "tsc -p tsconfig.spec.json --noEmit --pretty false"
+      },
+      "inputs": [
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.spec.json",
+        "{projectRoot}/src/**/*.ts",
+        "{projectRoot}/src/**/*.d.ts"
+      ],
+      "cache": true
+    },
+    "typecheck-architecture": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/demo",
+        "command": "tsc -p tsconfig.architecture.json --noEmit --pretty false"
+      },
+      "inputs": [
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.architecture.json",
+        "{projectRoot}/architecture/**/*.ts",
+        "{workspaceRoot}/libs/dev-tools/src/**/*.ts"
+      ],
+      "cache": true
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/apps/demo"],
+      "options": {
+        "command": "npx vite build --config apps/demo/vite.config.ts"
+      },
+      "configurations": {
+        "production": {
+          "command": "npx vite build --config apps/demo/vite.config.ts --mode production"
+        },
+        "development": {
+          "command": "npx vite build --config apps/demo/vite.config.ts --mode development"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
+    "serve": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-local-types"],
+      "options": {
+        "commands": [
+          {
+            "command": "npx vite --config apps/demo/vite.config.ts",
+            "forwardAllArgs": true
+          },
+          {
+            "command": "node tools/demo-typecheck.mjs --watch --non-blocking",
+            "forwardAllArgs": false
+          }
+        ],
+        "parallel": true
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint"
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/run-lib-vitest.mjs apps/demo/vitest.config.ts",
+        "forwardAllArgs": true
+      }
+    },
+    "architecture": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx vitest run --config vitest.architecture.config.ts",
+        "cwd": "apps/demo"
+      },
+      "inputs": [
+        "{projectRoot}/src/**/*.ts",
+        "{projectRoot}/architecture/**/*.ts",
+        "{projectRoot}/tsconfig.graph.json",
+        "{projectRoot}/tsconfig.architecture.json",
+        "{workspaceRoot}/libs/dev-tools/src/**/*.ts"
+      ],
+      "cache": true
+    },
+    "serve-static": {
+      "continuous": true,
+      "executor": "@nx/web:file-server",
+      "options": {
+        "buildTarget": "demo:build",
+        "staticFilePath": "dist/apps/demo",
+        "spa": true
+      }
+    }
+  }
+}

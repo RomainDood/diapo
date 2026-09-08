@@ -1,0 +1,35 @@
+{
+  "name": "@craft-ts/function-registry-mcp",
+  "version": "0.8.3",
+  "description": "MCP bridge for CraftTS browser pages and runtime registry",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.d.ts",
+    "!dist/**/*.spec.js.map"
+  ],
+  "bin": {
+    "craft-ts-registry-mcp": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && node dist/main.js",
+    "test": "vitest run --config vitest.config.mts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "ws": "8.18.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "@types/ws": "8.18.1",
+    "typescript": "6.0.3",
+    "vitest": "^4.0.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

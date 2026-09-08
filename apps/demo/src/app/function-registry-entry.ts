@@ -1,0 +1,178 @@
+import {
+  DestroyRef,
+  provideAppInitializer,
+  ɵinject as inject,
+  ɵInjector as Injector,
+  ɵrunInInjectionContext as runInInjectionContext,
+} from '@craft-ts/core';
+import {
+  BrowserDocument,
+  BrowserLocation,
+  CraftRouter,
+  craftUse,
+  executeGeneratorCompatibleFactory,
+  HOST_TAG_LIST,
+  injectPrimitiveMethodRuntimeContext,
+  provideFnWrapper,
+  ɵinject,
+  type PrimitiveMethodRuntimeContext,
+  type PrimitiveResourceRuntimeContext,
+} from '@craft-ts/core';
+import {
+  buildFunctionRegistryKey,
+  getFunctionEntryByKey,
+  registerFunctionEntry,
+  registerResourceEntry,
+} from './function-registry';
+import { provideFnWrapObserver } from '@craft-ts/core';
+import { providePrimitiveResourceRuntimeObserver } from '@craft-ts/core';
+import { functionRegistry } from './function-registry';
+import {
+  FunctionRegistryBridgeUrl,
+  FunctionRegistryClientId,
+  createFunctionRegistryClientId,
+  provideFunctionRegistryBridgeUrl,
+  provideFunctionRegistryClientId,
+  startFunctionRegistryBridge,
+} from './function-registry-bridge';
+import { toCraftGotoTarget } from './page-actor';
+
+type RegistryFactory = (...args: unknown[]) => unknown;
+
+export function ensureFunctionRegistryEntry(
+  factory: RegistryFactory,
+  thisArg: unknown,
+  runtimeContext: PrimitiveMethodRuntimeContext | undefined,
+): string {
+  const hostTags = ɵinject(HOST_TAG_LIST);
+  const hostName = hostTags[hostTags.length - 1] ?? 'unknown';
+  const ancestry = hostTags.slice(0, -1);
+  const key = buildFunctionRegistryKey(hostName, ancestry);
+  if (getFunctionEntryByKey(key) !== undefined) {
+    return key;
+  }
+
+  // Wrapper boundary: retain the original scoped injector for remote replay.
+  const destroyRef = inject(DestroyRef);
+  const injector = inject(Injector);
+  const cleanup = registerFunctionEntry(
+    hostName,
+    ancestry,
+    (...registryArgs) =>
+      executeGeneratorCompatibleFactory({
+        factory,
+        thisArg,
+        getInjector: () => injector,
+        args: registryArgs,
+        invalidYieldErrorMessage:
+          'Registry functions can only yield dependencies available in their original Craft context.',
+        multipleAppStartErrorMessage:
+          'Registry functions cannot declare multiple app-start hooks.',
+        onAppStartNotSupportedErrorMessage:
+          'Registry functions cannot declare app-start hooks.',
+      }),
+    runtimeContext,
+  );
+  destroyRef.onDestroy(cleanup);
+  return key;
+}
+
+export function ensureResourceRegistryEntry(
+  resourceContext: PrimitiveResourceRuntimeContext,
+): string {
+  const hostTags = ɵinject(HOST_TAG_LIST);
+  const hostName = hostTags[hostTags.length - 1] ?? 'unknown';
+  const ancestry = hostTags.slice(0, -1);
+  const key = buildFunctionRegistryKey(hostName, ancestry);
+  if (getFunctionEntryByKey(key)?.primitive !== undefined) {
+    return key;
+  }
+
+  // Primitive value boundary: expose the live primitive instance for dev-only MCP
+  // reads and mutations.
+  const destroyRef = inject(DestroyRef);
+  const cleanup = registerResourceEntry(hostName, ancestry, resourceContext);
+  destroyRef.onDestroy(cleanup);
+  return key;
+}
+
+export const provideMcpExperimentation = () => [
+  provideFunctionRegistryBridgeUrl(() =>
+    // eslint-disable-next-line craft-ts/prefer-browser-boundaries
+    globalThis.__CRAFT_FUNCTION_REGISTRY_BRIDGE_URL__ ?? 'ws://127.0.0.1:3333',
+  ),
+  provideFunctionRegistryClientId(() =>
+    createFunctionRegistryClientId(
+      // This value is resolved while the root injector is bootstrapping.
+      // eslint-disable-next-line craft-ts/prefer-browser-boundaries
+      globalThis.sessionStorage,
+      // eslint-disable-next-line craft-ts/prefer-browser-boundaries
+      () => globalThis.crypto.randomUUID(),
+    ),
+  ),
+  provideAppInitializer(() => {
+    // Bootstrap boundary: the bridge lifetime follows the application injector.
+    const destroyRef = inject(DestroyRef);
+    const injector = inject(Injector);
+    const { url, clientId } = craftUse(function* () {
+      return {
+        url: yield* FunctionRegistryBridgeUrl(),
+        clientId: yield* FunctionRegistryClientId(),
+      };
+    });
+    const stopBridge = startFunctionRegistryBridge({
+      injector,
+      url,
+      clientId,
+      getPageInfo: () =>
+        runInInjectionContext(injector, () =>
+          craftUse(function* () {
+            return {
+              pageUrl: yield* BrowserLocation.href(),
+              pageTitle: yield* BrowserDocument.title(),
+            };
+          }),
+        ),
+      navigate: (url) =>
+        runInInjectionContext(injector, () =>
+          craftUse(function* () {
+            const router = yield* CraftRouter();
+            return router.navigateByUrl({
+              to: toCraftGotoTarget(url),
+            } as Parameters<CraftRouter['navigateByUrl']>[0]);
+          }),
+        ).then((matched) => {
+          if (!matched) {
+            throw new Error(`goto "${url}" was not matched`);
+          }
+        }),
+    });
+    destroyRef.onDestroy(stopBridge);
+  }),
+  provideFnWrapObserver((factory) => {
+    const runtimeContext = injectPrimitiveMethodRuntimeContext();
+    if (runtimeContext !== undefined) {
+      ensureFunctionRegistryEntry(factory, undefined, runtimeContext);
+    }
+  }),
+  // Web MCP experimentation: expose primitive resources to the runtime registry.
+  providePrimitiveResourceRuntimeObserver((resourceContext) => {
+    ensureResourceRegistryEntry(resourceContext);
+  }),
+  provideFnWrapper(
+    'Warning: dependency injection here is not type-safe and may fail at runtime',
+    function* (factory, thisArg, args) {
+      const runtimeContext = injectPrimitiveMethodRuntimeContext();
+      const key = ensureFunctionRegistryEntry(factory, thisArg, runtimeContext);
+      const override = functionRegistry.executeOverride(
+        key,
+        args,
+        runtimeContext,
+      );
+      if (override.matched) {
+        return override.result;
+      }
+      return yield* factory.apply(thisArg, args);
+    },
+  ),
+];

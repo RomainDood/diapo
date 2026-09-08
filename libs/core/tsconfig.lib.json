@@ -1,0 +1,37 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/out-tsc",
+    "declaration": true,
+    "declarationMap": true,
+    "inlineSources": true,
+    "types": []
+  },
+  "include": ["**/*.ts"],
+  "exclude": [
+    "**/*.spec.ts",
+    "**/*.fixture.ts",
+    "test-setup.ts",
+    "jest.config.ts",
+    "**/*.test.ts",
+    "vite.config.ts",
+    "vite.config.mts",
+    "vitest.config.ts",
+    "vitest.config.mts",
+    "**/*.test.tsx",
+    "**/*.spec.tsx",
+    "**/*.test.js",
+    "**/*.spec.js",
+    "**/*.test.jsx",
+    "**/*.spec.jsx"
+  ],
+  "references": [
+    {
+      "path": "../test-type/tsconfig.lib.json"
+    },
+    {
+      "path": "../dev-tools/tsconfig.lib.json"
+    }
+  ]
+}

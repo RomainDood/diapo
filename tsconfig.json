@@ -1,0 +1,43 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./libs/dev-tools"
+    },
+    {
+      "path": "./libs/component"
+    },
+    {
+      "path": "./libs/core"
+    },
+    {
+      "path": "./libs/i18n"
+    },
+    {
+      "path": "./libs/i18n-effect"
+    },
+    {
+      "path": "./libs/test-type"
+    },
+    {
+      "path": "./libs/effect"
+    },
+    {
+      "path": "./libs/deploy"
+    },
+    {
+      "path": "./libs/cli"
+    },
+    {
+      "path": "./libs/deploy-alchemy"
+    },
+    {
+      "path": "./libs/style-testing"
+    },
+    {
+      "path": "./libs/style"
+    }
+  ]
+}
