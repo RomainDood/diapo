@@ -1,0 +1,216 @@
+import { TestBed } from '../host/craft-test-bed';
+import { provideCraftRouter } from '../craft-router';
+import { craftService } from '../craft-service';
+import { query } from '../query';
+import { queryParams } from '../query-params';
+import { state } from '../state';
+import { insertForm } from './insert-form';
+import { craftUse } from '../craft-use';
+
+type User = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+describe('insertForm compatibility with queryParams', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.configureTestingModule({
+      providers: [...provideCraftRouter([])],
+    }).compileComponents();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('infers the field tree type from the query param state (not unknown)', () => {
+    TestBed.runInInjectionContext(() => {
+      craftUse(
+        queryParams(
+          'filters',
+          {
+            state: {
+              name: {
+                fallbackValue: 'romain',
+                codec: {
+                  decode: (value: string) => value,
+                  encode: (value: string) => String(value),
+                },
+              },
+              page: {
+                fallbackValue: 1,
+                codec: {
+                  decode: (value: string) => parseInt(value, 10),
+                  encode: (value: unknown) => String(value),
+                },
+              },
+            },
+          },
+          insertForm(({ field }) => {
+            // The whole point: `field` is typed from the query param state,
+            // so accessing nested fields is type-safe (not `unknown`).
+            expectTypeOf(field.name.value()).toEqualTypeOf<string>();
+            expectTypeOf(field.page.value()).toEqualTypeOf<number>();
+            return {};
+          }),
+        ),
+      );
+    });
+  });
+
+  it('exposes a working form at runtime over the query param state', () => {
+    TestBed.runInInjectionContext(() => {
+      const params = craftUse(
+        queryParams(
+          'params',
+          {
+            state: {
+              name: {
+                fallbackValue: 'romain',
+                codec: {
+                  decode: (value: string) => value,
+                  encode: (value: string) => String(value),
+                },
+              },
+              page: {
+                fallbackValue: 1,
+                codec: {
+                  decode: (value: string) => parseInt(value, 10),
+                  encode: (value: unknown) => String(value),
+                },
+              },
+            },
+          },
+          insertForm(),
+        ),
+      );
+
+      expect(params.form).toBeDefined();
+      expect(craftUse(params.form.name.value())).toBe('romain');
+      expect(craftUse(params.form.page.value())).toBe(1);
+      expect(craftUse(params.form.value())).toEqual({ name: 'romain', page: 1 });
+    });
+  });
+
+  it('runs chained insertions inside a queryParams context', () => {
+    TestBed.runInInjectionContext(() => {
+      const params = craftUse(
+        queryParams(
+          'params',
+          {
+            state: {
+              name: {
+                fallbackValue: 'romain',
+                codec: {
+                  decode: (value: string) => value,
+                  encode: (value: string) => String(value),
+                },
+              },
+            },
+          },
+          insertForm(
+            ({ field }) => ({
+              getName: () => field.name.value(),
+            }),
+            ({ insertions }) => ({
+              upperName: () => craftUse(insertions.getName()).toUpperCase(),
+            }),
+          ),
+        ),
+      );
+
+      expect(craftUse(params.form.getName())).toBe('romain');
+      expect(craftUse(params.form.upperName())).toBe('ROMAIN');
+    });
+  });
+});
+
+describe('insertForm compatibility with query', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('infers the field tree type from the resource state (not unknown)', () => {
+    craftService({ name: 'UserStoreTyping', providedIn: 'global' }, function* () {
+      return {
+        user: yield* query(
+          'user',
+          {
+            params: () => '5',
+            loader: async ({ params }): Promise<User> => ({
+              id: params,
+              name: 'John Doe',
+              email: 'john@doe.com',
+            }),
+          },
+          insertForm(({ field }) => {
+            expectTypeOf(field.name.value()).toEqualTypeOf<string>();
+            expectTypeOf(field.email.value()).toEqualTypeOf<string>();
+            expectTypeOf(field.id.value()).toEqualTypeOf<string>();
+            return {};
+          }),
+        ),
+      };
+    });
+  });
+
+  it('exposes a working form at runtime over the resolved resource state', async () => {
+    const { UserStore } = craftService(
+      { name: 'UserStore', providedIn: 'global' },
+      function* () {
+        return {
+          user: yield* query(
+            'user',
+            {
+              params: () => '5',
+              loader: async ({ params }): Promise<User> => ({
+                id: params,
+                name: 'John Doe',
+                email: 'john@doe.com',
+              }),
+            },
+            insertForm(),
+          ),
+        };
+      },
+    );
+
+    await TestBed.runInInjectionContext(async () => {
+      const store = craftUse(UserStore());
+      expect(store.user.form).toBeDefined();
+
+      await vi.runAllTimersAsync();
+
+      expect(craftUse(store.user.form.name.value())).toBe('John Doe');
+      expect(craftUse(store.user.form.email.value())).toBe('john@doe.com');
+    });
+  });
+});
+
+describe('insertForm regression with state primitive', () => {
+  it('still infers the field tree type and works over a plain state', () => {
+    TestBed.runInInjectionContext(() => {
+      const loginForm = craftUse(
+        state(
+          'loginForm',
+          { name: 'romain', password: 'secret' },
+          insertForm(({ field }) => {
+            expectTypeOf(field.name.value()).toEqualTypeOf<string>();
+            expectTypeOf(field.password.value()).toEqualTypeOf<string>();
+            return {
+              getName: () => field.name.value(),
+            };
+          }),
+        ),
+      );
+
+      expect(craftUse(loginForm.form.name.value())).toBe('romain');
+      expect(craftUse(loginForm.form.getName())).toBe('romain');
+    });
+  });
+});

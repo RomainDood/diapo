@@ -1,0 +1,259 @@
+import {
+  computed,
+  signal,
+} from './host/craft-compat';
+import { TestBed } from './host/craft-test-bed';
+import {
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from 'vitest';
+import { Equal, Expect } from 'test-type';
+import type { ExtractDeps } from './branded-component/branded-component';
+import { craftComputed } from './craft-computed';
+import {
+  craftService,
+  onAppStart,
+  type GetServiceDependencies,
+} from './craft-service';
+import type { YieldableReactiveValue } from './reactive-read';
+import { craftUse } from './craft-use';
+import { craftSignal } from './host/craft-signal';
+
+describe('craftComputed', () => {
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+  });
+
+  it('should require an injection context', () => {
+    class OutsideInjectionContext {
+      readonly total = craftComputed('total', () => 42);
+    }
+
+    expect(() => new OutsideInjectionContext()).toThrow();
+  });
+
+  it('should work with a plain computation function', () => {
+    class CounterComponent {
+      readonly count = signal(0);
+      readonly doubled = craftComputed('doubled', () => this.count() * 2);
+    }
+
+    const component = TestBed.runInInjectionContext(
+      () => new CounterComponent(),
+    );
+
+    expect(craftUse(component.doubled())).toBe(0);
+    component.count.set(5);
+    expect(craftUse(component.doubled())).toBe(10);
+  });
+
+  it('memoizes repeated reads until a dependency changes', () => {
+    const computation = vi.fn(() => 42);
+    const value = TestBed.runInInjectionContext(() =>
+      craftComputed('value', computation),
+    );
+
+    expect(craftUse(value())).toBe(42);
+    const callsAfterFirstRead = computation.mock.calls.length;
+    expect(craftUse(value())).toBe(42);
+
+    expect(computation).toHaveBeenCalledTimes(callsAfterFirstRead);
+  });
+
+  it('evaluates once per invalidation for an Angular computed consumer', () => {
+    const craftSource = craftSignal(2);
+    const angularSource = signal(3);
+    const computation = vi.fn(() => craftSource() * angularSource());
+    const value = TestBed.runInInjectionContext(() =>
+      craftComputed('single-evaluation', computation),
+    );
+    const angularConsumer = computed(() => craftUse(value()));
+
+    expect(angularConsumer()).toBe(6);
+    expect(computation).toHaveBeenCalledTimes(1);
+
+    expect(angularConsumer()).toBe(6);
+    expect(computation).toHaveBeenCalledTimes(1);
+
+    craftSource.set(4);
+    expect(computation).toHaveBeenCalledTimes(1);
+    expect(angularConsumer()).toBe(12);
+    expect(computation).toHaveBeenCalledTimes(2);
+
+    angularSource.set(5);
+    expect(angularConsumer()).toBe(20);
+    expect(computation).toHaveBeenCalledTimes(3);
+  });
+
+  it('invalidates an Angular computed when a Craft dependency changes', () => {
+    const source = craftSignal(2);
+    const value = TestBed.runInInjectionContext(() =>
+      craftComputed('value', () => source() * 3),
+    );
+    const angularConsumer = computed(() => craftUse(value()));
+
+    expect(angularConsumer()).toBe(6);
+
+    source.set(4);
+
+    expect(angularConsumer()).toBe(12);
+  });
+
+  it('recovers an Angular consumer after a thrown first evaluation', () => {
+    const ready = craftSignal(false);
+    const value = TestBed.runInInjectionContext(() =>
+      craftComputed('recover', () => {
+        if (!ready()) {
+          throw new Error('not ready');
+        }
+        return 'recovered';
+      }),
+    );
+    const angularConsumer = computed(() => craftUse(value()));
+
+    expect(() => angularConsumer()).toThrow('not ready');
+
+    ready.set(true);
+
+    expect(angularConsumer()).toBe('recovered');
+  });
+
+  it('retraces conditional Angular dependencies after a Craft branch switch', () => {
+    const useSecond = craftSignal(false);
+    const first = signal('first');
+    const second = signal('second');
+    const value = TestBed.runInInjectionContext(() =>
+      craftComputed('conditional', () => (useSecond() ? second() : first())),
+    );
+    const angularConsumer = computed(() => craftUse(value()));
+
+    expect(angularConsumer()).toBe('first');
+
+    useSecond.set(true);
+    expect(angularConsumer()).toBe('second');
+
+    second.set('updated');
+
+    expect(angularConsumer()).toBe('updated');
+  });
+
+  it('stays lazy after an unread Craft invalidation', () => {
+    const source = craftSignal(1);
+    const computation = vi.fn(() => source() * 2);
+    const value = TestBed.runInInjectionContext(() =>
+      craftComputed('lazy', computation),
+    );
+
+    expect(craftUse(value())).toBe(2);
+    const callsAfterRead = computation.mock.calls.length;
+
+    source.set(2);
+
+    expect(computation).toHaveBeenCalledTimes(callsAfterRead);
+  });
+
+  it('should work with a generator factory that resolves DI deps once', () => {
+    const { Multiplier } = craftService(
+      { name: 'Multiplier', providedIn: 'function' },
+      () => ({ factor: 3 }),
+    );
+
+    class CounterComponent {
+      readonly count = signal(0);
+
+      // The host form binds `this` inside the generator (and the computation
+      // it returns) to the component instance.
+      readonly tripled = craftComputed('tripled', this, function* () {
+        const multiplier = yield* Multiplier();
+        return this.count() * multiplier.factor;
+      });
+    }
+
+    const component = TestBed.runInInjectionContext(
+      () => new CounterComponent(),
+    );
+
+    expect(craftUse(component.tripled())).toBe(0);
+    component.count.set(4);
+    expect(craftUse(component.tripled())).toBe(12);
+  });
+
+  it('should reject onAppStart inside craftComputed generators', () => {
+    class InvalidComponent {
+      readonly value = craftComputed('value', function* () {
+        yield* onAppStart(() => undefined);
+        return 42;
+      });
+    }
+
+    const component = TestBed.runInInjectionContext(
+      () => new InvalidComponent(),
+    );
+    expect(() => craftUse(component.value())).toThrow(
+      'craftComputed(...) does not support onAppStart(...). Use onAppStart(...) only inside craftService({ appStart: true }, ...) generators.',
+    );
+  });
+
+  it('should preserve Signal<T> type from plain computation', () => {
+    const { Multiplier4 } = craftService(
+      { name: 'Multiplier4', providedIn: 'function' },
+      () => ({ factor: 2 }),
+    );
+
+    class CounterComponent {
+      readonly count = signal(0);
+      readonly doubled = craftComputed('doubled', () => this.count() * 2);
+      readonly tripled = craftComputed('tripled', this, function* () {
+        const m = yield* Multiplier4();
+        return this.count() * m.factor;
+      });
+    }
+
+    const component = TestBed.runInInjectionContext(
+      () => new CounterComponent(),
+    );
+
+    expectTypeOf(component.doubled).toMatchTypeOf<
+      YieldableReactiveValue<number>
+    >();
+    expectTypeOf(component.tripled).toMatchTypeOf<
+      YieldableReactiveValue<number>
+    >();
+
+    type _PlainComputedIsYieldable = Expect<
+      CounterComponent['doubled'] extends YieldableReactiveValue<number>
+        ? true
+        : false
+    >;
+    type _GeneratorComputedIsYieldable = Expect<
+      CounterComponent['tripled'] extends YieldableReactiveValue<number>
+        ? true
+        : false
+    >;
+  });
+
+  it('should expose craftComputed dependencies through ExtractDeps', () => {
+    const { Multiplier5 } = craftService(
+      { name: 'Multiplier5', providedIn: 'function' },
+      () => ({ factor: 5 }),
+    );
+
+    class Component {
+      readonly count = signal(0);
+      readonly value = craftComputed('value', this, function* () {
+        const m = yield* Multiplier5();
+        return this.count() * m.factor;
+      });
+    }
+
+    type ExpectedDeps = {
+      Multiplier5: GetServiceDependencies<typeof Multiplier5>;
+    };
+    type _Deps = Expect<Equal<ExtractDeps<Component['value']>, ExpectedDeps>>;
+  });
+});

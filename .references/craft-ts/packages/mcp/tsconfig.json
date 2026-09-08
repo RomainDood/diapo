@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "sourceMap": true,
+    "noEmit": false,
+    "strict": true,
+    "isolatedModules": true,
+    "customConditions": [],
+    // This package builds and publishes on its own: workspace path mappings
+    // would pull library *sources* into its program, under its own stricter
+    // resolution. It resolves its dependencies the way a consumer does.
+    "paths": {},
+    "importHelpers": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts"],
+  "references": [
+    {
+      "path": "../../libs/dev-tools"
+    }
+  ]
+}

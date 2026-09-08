@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "mode": "context",
+  "effectEnabled": true,
+  "craftTs": {
+    "url": "https://github.com/craft-ts/craft-ts.git",
+    "requestedRef": "main",
+    "resolvedSha": "36b9bafbc199033aab1cc45e3152569dd7593811",
+    "path": ".references/craft-ts"
+  },
+  "effectTs": {
+    "url": "https://github.com/Effect-TS/effect.git",
+    "requestedRef": "main",
+    "resolvedSha": "",
+    "path": ".references/effect-ts"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "@craft-ts/mcp",
+  "version": "0.8.3",
+  "description": "MCP server, Agent Skills, and LLM files for coding agents using @craft-ts/core",
+  "author": "Romain Geffrault",
+  "license": "MIT",
+  "homepage": "https://craft-ts.github.io/craft/resources/ai-agents",
+  "bugs": {
+    "url": "https://github.com/craft-ts/craft-ts/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/craft-ts/craft-ts.git",
+    "directory": "packages/mcp"
+  },
+  "type": "module",
+  "bin": {
+    "craft-ts-mcp": "dist/main.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "content",
+    "plugin.json",
+    "mcp.json",
+    "README.md",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.d.ts",
+    "!dist/**/*.spec.js.map"
+  ],
+  "scripts": {
+    "bundle-docs": "node scripts/bundle-docs.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && node dist/main.js",
+    "test": "vitest run --config vitest.config.mts"
+  },
+  "dependencies": {
+    "@craft-ts/dev-tools": "^0.8.3",
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "typescript": "6.0.3",
+    "vitest": "^4.0.8"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "craft-ts",
+    "craft-ts",
+    "angular",
+    "mcp",
+    "mcp-server",
+    "llms.txt",
+    "agent-skills",
+    "ai"
+  ]
+}

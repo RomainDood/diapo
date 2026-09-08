@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../dist/out-tsc",
+    "types": [
+      "vitest/globals",
+      "vitest/importMeta",
+      "vite/client",
+      "node",
+      "vitest"
+    ],
+    "erasableSyntaxOnly": false
+  },
+  "include": ["vitest.config.mts", ".vitepress/config.mts", "tests/**/*.ts"],
+  "exclude": ["tests/snippets/guide/app/app-start/**/*.ts"]
+}
