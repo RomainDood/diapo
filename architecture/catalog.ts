@@ -1,7 +1,7 @@
 // Generated. Do not edit.
 export const architectureCatalog = {
   "version": 1,
-  "graphHash": "4713b155c531bfac",
+  "graphHash": "f022e591b8a486c5",
   "routes": [
     "editor/:presentationId",
     "feature",

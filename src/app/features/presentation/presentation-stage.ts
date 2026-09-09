@@ -120,7 +120,7 @@ const dragPresentationSurface = craftNodeDirective(
       offsetY = event.clientY - bounds.top;
       surface.dataset.dragging = 'true';
       surface.style.position = 'fixed';
-      surface.style.zIndex = handle.dataset.dragSurface === 'canvas' ? '0' : '12';
+      surface.style.zIndex = handle.dataset.dragSurface === 'topbar' ? '20' : '12';
       surface.style.width = `${bounds.width}px`;
       surface.style.height = `${bounds.height}px`;
       surface.style.margin = '0';
@@ -302,7 +302,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
     },
     ({ presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, activeLink, slideItems, next, previous, selectSlide, toggleNotes, openPresentationLink, handleKeydown, presentationId }) =>
       div({ class: 'presentation-shell', 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
-        div({ class: 'presentation-topbar' }, presenterMode
+        div({ class: 'presentation-topbar', 'data-drag-surface': 'topbar' }, presenterMode
           ? [
               a('publicView', { class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.publicView'), 'data-navigation': 'external', href: function* () { return `/present/${yield* presentationId()}`; } }, i18n.t('ui.presentation.publicView')),
               span({ class: 'presentation-brand' }, function* () { return (yield* presentation.value())?.title ?? i18n.t('ui.presentation.loading'); }),
@@ -314,8 +314,8 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               a('presenterView', { class: 'presentation-control', 'aria-label': i18n.t('ui.presentation.presenterView'), 'data-navigation': 'external', href: function* () { return `/presenter/${yield* presentationId()}`; } }, i18n.t('ui.presentation.presenterView')),
             ]).pipe(dragPresentationSurface),
         ifNode(presentation.isLoading, () => p({ class: 'presentation-loading' }, i18n.t('ui.presentation.loading'))),
-        ifNode(overview, () => section({ class: 'presentation-overview', 'aria-labelledby': 'presentationOverviewTitle' }, [
-          h('canvas', { class: 'presentation-overview__canvas', 'data-drag-surface': 'canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop).pipe(dragPresentationSurface),
+        ifNode(overview, () => section({ class: 'presentation-overview', 'data-drag-surface': 'overview', 'aria-labelledby': 'presentationOverviewTitle' }, [
+          h('canvas', { class: 'presentation-overview__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
           div({ class: 'presentation-overview__content' }, [
             // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
             ifNode(hasCoverImage, () => img({ class: 'presentation-overview__image', src: function* () { return safePresentationImageUrl((yield* presentation.value())?.coverImageUrl ?? ''); }, alt: function* () { return (yield* presentation.value())?.coverImageAlt || i18n.t('ui.editor.coverImageAltFallback'); } })),
@@ -334,7 +334,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               ]),
             ])),
           ]),
-        ])),
+        ]).pipe(dragPresentationSurface)),
         ifNode(showStage, () => section({ class: 'presentation-stage', tabIndex: -1 }, [
           div({ class: 'presentation-stage__glow' }),
           forNode(

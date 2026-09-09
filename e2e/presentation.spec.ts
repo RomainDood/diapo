@@ -242,17 +242,17 @@ test('lets the presenter move speaker notes on the desktop stage', async ({ page
   expect(movedNotesPosition).not.toEqual(initialNotesPosition);
 });
 
-test('lets the presenter move the overview canvas and topbar', async ({ page }) => {
+test('lets the presenter move the overview and topbar across the viewport', async ({ page }) => {
   await page.goto('/presenter/presentation-demo');
 
-  const overviewCanvas = page.locator('.presentation-overview__canvas');
-  const canvasBox = await overviewCanvas.boundingBox();
-  expect(canvasBox).not.toBeNull();
-  await page.mouse.move((canvasBox?.x ?? 0) + 24, (canvasBox?.y ?? 0) + 24);
+  const overview = page.locator('.presentation-overview');
+  const overviewBox = await overview.boundingBox();
+  expect(overviewBox).not.toBeNull();
+  await page.mouse.move((overviewBox?.x ?? 0) + 24, (overviewBox?.y ?? 0) + 24);
   await page.mouse.down();
   await page.mouse.move(140, 180);
   await page.mouse.up();
-  await expect(overviewCanvas).toHaveCSS('position', 'fixed');
+  await expect(overview).toHaveCSS('position', 'fixed');
 
   const topbar = page.locator('.presentation-topbar');
   const brand = page.locator('.presentation-brand');
