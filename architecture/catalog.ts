@@ -1,7 +1,7 @@
 // Generated. Do not edit.
 export const architectureCatalog = {
   "version": 1,
-  "graphHash": "f022e591b8a486c5",
+  "graphHash": "580ed0e758c0879d",
   "routes": [
     "editor/:presentationId",
     "feature",
@@ -22,6 +22,7 @@ export const architectureCatalog = {
     "addSection",
     "addSequence",
     "autosaveStatus",
+    "closePresentationLink",
     "collapsedSectionIds",
     "coverImageAlt",
     "createPresentation",
@@ -51,6 +52,7 @@ export const architectureCatalog = {
     "imageUploadNotice",
     "imageUploading",
     "isAutosaving",
+    "linkReturnState",
     "moveSection",
     "newPresentationDraft",
     "next",
@@ -70,6 +72,7 @@ export const architectureCatalog = {
     "sectionNavigation",
     "sectionViews",
     "selectSlide",
+    "showOverviewContent",
     "showStage",
     "slideIndex",
     "slideItems",

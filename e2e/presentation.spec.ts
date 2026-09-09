@@ -290,6 +290,7 @@ test('opens a speaker note link inside the presentation and returns to the same 
   await page.getByRole('link', { name: 'https://example.com/presentation-reference' }).click();
 
   await expect(page.locator('.presentation-link-viewer')).toBeVisible();
+  await expect(page.locator('.presentation-overview .presentation-link-viewer__frame')).toBeVisible();
   await expect(page.locator('.presentation-link-viewer__url')).toHaveText('https://example.com/presentation-reference');
   await expect(page.frameLocator('iframe[title="Embedded presentation link"]').getByText('Embedded reference content')).toBeVisible();
   await page.getByRole('button', { name: 'Back to presentation' }).click();

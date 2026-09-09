@@ -191,7 +191,7 @@ button, .button { font: inherit; font-size: var(--craft-font-size-button); line-
 .presentation-notes__body a { color: #f6b7ff; font-weight: 750; text-decoration: underline; text-decoration-color: #f736e3aa; text-underline-offset: .18em; }
 .presentation-notes__body a:hover, .presentation-notes__body a:focus-visible { color: #fff; text-decoration-color: #fff; }
 .presentation-loading { max-width: 1280px; margin: 1rem auto; color: #aab8dd; }
-.presentation-link-viewer { position: fixed; z-index: 30; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: .8rem; padding: 1rem clamp(1rem, 4vw, 4rem) 1.2rem; color: #f8fafc; background: #100b1b; animation: presentation-link-viewer-enter .45s cubic-bezier(.2,.8,.2,1) both; }
+.presentation-link-viewer { position: absolute; z-index: 2; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: .8rem; padding: clamp(1rem, 4vw, 3rem); color: #f8fafc; background: #100b1b; animation: presentation-link-viewer-enter .45s cubic-bezier(.2,.8,.2,1) both; }
 .presentation-link-viewer__topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(100%, 1280px); margin: 0 auto; }
 .presentation-link-viewer__heading { display: grid; min-width: 0; gap: .25rem; }
 .presentation-link-viewer__url { max-width: min(62vw, 62rem); overflow: hidden; color: #d7e0fc; font-size: .86rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
@@ -201,6 +201,7 @@ button, .button { font: inherit; font-size: var(--craft-font-size-button); line-
 .presentation-overview { position: relative; display: grid; min-height: min(78vh, 760px); max-width: 1280px; margin: 1rem auto 0; padding: clamp(2rem, 6vw, 5rem); border: 1px solid #bab2eb33; border-radius: 1.5rem; background: linear-gradient(135deg, #10051cdd, #211047cc), radial-gradient(circle at 75% 20%, #f736e355, transparent 32%), linear-gradient(135deg, #211047, #8514f5 60%, #e90464); box-shadow: 0 2rem 7rem #10051c; overflow: hidden; }
 .presentation-overview__canvas { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .presentation-overview[data-dragging='true'] { cursor: grabbing; }
+.presentation-overview[data-link-viewer='true'] { z-index: 15; }
 .presentation-overview { cursor: grab; touch-action: none; }
 .presentation-overview__content { position: relative; z-index: 1; display: grid; justify-items: center; min-width: 0; gap: .8rem; max-width: 54rem; margin: 0 auto 2rem; text-align: center; }
 .presentation-overview__image { width: min(100%, 34rem); max-height: 12rem; border: 1px solid #bab2eb66; border-radius: 1rem; object-fit: cover; box-shadow: 0 1rem 3rem #10051c88; }

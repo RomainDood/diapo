@@ -177,6 +177,10 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         show: () => set(true),
         hide: () => set(false),
       }));
+      const linkReturnState = yield* state('linkReturnState', false, ({ set }) => ({
+        remember: (wasOverviewVisible: boolean) => set(wasOverviewVisible),
+        clear: () => set(false),
+      }));
       const publicNotesHidden = craftComputed('publicNotesHidden', () => false);
       const showNotes = presenterMode ? notesVisible : publicNotesHidden;
       const hasCoverImage = craftComputed('hasCoverImage', function* () {
@@ -233,6 +237,9 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       });
       const hasActiveLink = craftComputed('hasActiveLink', function* () {
         return Boolean(yield* activeLink());
+      });
+      const showOverviewContent = craftComputed('showOverviewContent', function* () {
+        return !(yield* hasActiveLink());
       });
       const slideItems = craftComputed('slideItems', function* () {
         const slide = yield* currentSlide();
@@ -296,11 +303,20 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       });
       const openPresentationLink = craftMethod('openPresentationLink', function* (url: string) {
         const safeUrlValue = safePresentationLinkUrl(url);
-        if (safeUrlValue) yield* activeLink.open(safeUrlValue);
+        if (safeUrlValue) {
+          yield* linkReturnState.remember(yield* overview());
+          yield* overview.show();
+          yield* activeLink.open(safeUrlValue);
+        }
       });
-      return { presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, activeLink, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, openPresentationLink, presentationId };
+      const closePresentationLink = craftMethod('closePresentationLink', function* () {
+        yield* activeLink.close();
+        if (!(yield* linkReturnState())) yield* overview.hide();
+        yield* linkReturnState.clear();
+      });
+      return { presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, presentationId };
     },
-    ({ presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, activeLink, slideItems, next, previous, selectSlide, toggleNotes, openPresentationLink, handleKeydown, presentationId }) =>
+    ({ presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, slideItems, next, previous, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, handleKeydown, presentationId }) =>
       div({ class: 'presentation-shell', 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
         div({ class: 'presentation-topbar', 'data-drag-surface': 'topbar' }, presenterMode
           ? [
@@ -314,25 +330,42 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               a('presenterView', { class: 'presentation-control', 'aria-label': i18n.t('ui.presentation.presenterView'), 'data-navigation': 'external', href: function* () { return `/presenter/${yield* presentationId()}`; } }, i18n.t('ui.presentation.presenterView')),
             ]).pipe(dragPresentationSurface),
         ifNode(presentation.isLoading, () => p({ class: 'presentation-loading' }, i18n.t('ui.presentation.loading'))),
-        ifNode(overview, () => section({ class: 'presentation-overview', 'data-drag-surface': 'overview', 'aria-labelledby': 'presentationOverviewTitle' }, [
+        ifNode(overview, () => section({ class: 'presentation-overview', 'data-drag-surface': 'overview', 'data-link-viewer': function* () { return String(yield* hasActiveLink()); }, 'aria-labelledby': 'presentationOverviewTitle' }, [
           h('canvas', { class: 'presentation-overview__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
-          div({ class: 'presentation-overview__content' }, [
-            // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
-            ifNode(hasCoverImage, () => img({ class: 'presentation-overview__image', src: function* () { return safePresentationImageUrl((yield* presentation.value())?.coverImageUrl ?? ''); }, alt: function* () { return (yield* presentation.value())?.coverImageAlt || i18n.t('ui.editor.coverImageAltFallback'); } })),
-            span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.overview')),
-            heading({ id: 'presentationOverviewTitle', class: 'presentation-overview__title' }, function* () { return (yield* presentation.value())?.title ?? ''; }),
-            p({ class: 'presentation-overview__objective' }, function* () { return (yield* presentation.value())?.objective ?? ''; }),
-            span({ class: 'presentation-overview__hint' }, i18n.t('ui.presentation.overviewHint')),
-          ]),
-          div({ class: 'presentation-overview__carousel', role: 'list', 'aria-label': i18n.t('ui.presentation.presentationOutline') }, [
-            forNode(sectionNavigation, { track: (part) => part.id }, (partInput) => button('overviewPart', { type: 'button', class: 'presentation-overview__card', 'aria-label': function* () { return `${i18n.t('ui.presentation.selectPart')}: ${(yield* partInput()).title}`; }, click: function* () { yield* selectSlide((yield* partInput()).firstSlideIndex); } }, [
-              span({ class: 'presentation-overview__card-index' }, function* () { return String((yield* partInput()).firstSlideIndex + 1).padStart(2, '0'); }),
-              span({ class: 'presentation-overview__card-title' }, function* () { return (yield* partInput()).title; }),
-              span({ class: 'presentation-overview__card-intention' }, function* () { return (yield* partInput()).intention; }),
-              div({ class: 'presentation-overview__card-sequences' }, [
-                forNode(function* () { return (yield* partInput()).sequences; }, { track: (sequence) => sequence.id }, (sequenceInput) => span({ class: 'presentation-overview__sequence' }, function* () { return (yield* sequenceInput()).title; })),
+          ifNode(hasActiveLink, () => section({ class: 'presentation-link-viewer', 'aria-label': i18n.t('ui.presentation.linkViewer') }, [
+            div({ class: 'presentation-link-viewer__topbar' }, [
+              div({ class: 'presentation-link-viewer__heading' }, [
+                span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.linkViewerEyebrow')),
+                span({ class: 'presentation-link-viewer__url' }, activeLink),
               ]),
-            ])),
+              div({ class: 'presentation-link-viewer__actions' }, [
+                a('openPresentationLinkExternal', { class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.openLinkExternal'), href: function* () { return safeUrl((yield* activeLink()) ?? ''); }, target: '_blank', rel: 'noopener noreferrer', 'data-navigation': 'external' }, i18n.t('ui.presentation.openLinkExternal')),
+                button('closePresentationLink', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.closeLink'), click: closePresentationLink }, i18n.t('ui.presentation.closeLink')),
+              ]),
+            ]),
+            div({ class: 'presentation-link-viewer__frame' }, [
+              iframe({ title: i18n.t('ui.presentation.linkViewer'), 'data-source': activeLink, loading: 'eager', referrerPolicy: 'no-referrer', sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin', allow: 'fullscreen; autoplay; picture-in-picture' }).pipe(embedPresentationLink),
+            ]),
+          ])),
+          ifNode(showOverviewContent, () => [
+            div({ class: 'presentation-overview__content' }, [
+              // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
+              ifNode(hasCoverImage, () => img({ class: 'presentation-overview__image', src: function* () { return safePresentationImageUrl((yield* presentation.value())?.coverImageUrl ?? ''); }, alt: function* () { return (yield* presentation.value())?.coverImageAlt || i18n.t('ui.editor.coverImageAltFallback'); } })),
+              span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.overview')),
+              heading({ id: 'presentationOverviewTitle', class: 'presentation-overview__title' }, function* () { return (yield* presentation.value())?.title ?? ''; }),
+              p({ class: 'presentation-overview__objective' }, function* () { return (yield* presentation.value())?.objective ?? ''; }),
+              span({ class: 'presentation-overview__hint' }, i18n.t('ui.presentation.overviewHint')),
+            ]),
+            div({ class: 'presentation-overview__carousel', role: 'list', 'aria-label': i18n.t('ui.presentation.presentationOutline') }, [
+              forNode(sectionNavigation, { track: (part) => part.id }, (partInput) => button('overviewPart', { type: 'button', class: 'presentation-overview__card', 'aria-label': function* () { return `${i18n.t('ui.presentation.selectPart')}: ${(yield* partInput()).title}`; }, click: function* () { yield* selectSlide((yield* partInput()).firstSlideIndex); } }, [
+                span({ class: 'presentation-overview__card-index' }, function* () { return String((yield* partInput()).firstSlideIndex + 1).padStart(2, '0'); }),
+                span({ class: 'presentation-overview__card-title' }, function* () { return (yield* partInput()).title; }),
+                span({ class: 'presentation-overview__card-intention' }, function* () { return (yield* partInput()).intention; }),
+                div({ class: 'presentation-overview__card-sequences' }, [
+                  forNode(function* () { return (yield* partInput()).sequences; }, { track: (sequence) => sequence.id }, (sequenceInput) => span({ class: 'presentation-overview__sequence' }, function* () { return (yield* sequenceInput()).title; })),
+                ]),
+              ])),
+            ]),
           ]),
         ]).pipe(dragPresentationSurface)),
         ifNode(showStage, () => section({ class: 'presentation-stage', tabIndex: -1 }, [
@@ -379,21 +412,6 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               link: (part) => a('speakerNoteLink', { 'aria-label': part.text, href: safeUrl(part.url), 'data-navigation': 'external', click: function* (event) { event.preventDefault(); yield* openPresentationLink(part.url); } }, part.text),
               text: (part) => span(part.text),
             })),
-          ]),
-        ])),
-        ifNode(hasActiveLink, () => section({ class: 'presentation-link-viewer', 'aria-label': i18n.t('ui.presentation.linkViewer') }, [
-          div({ class: 'presentation-link-viewer__topbar' }, [
-            div({ class: 'presentation-link-viewer__heading' }, [
-              span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.linkViewerEyebrow')),
-              span({ class: 'presentation-link-viewer__url' }, activeLink),
-            ]),
-            div({ class: 'presentation-link-viewer__actions' }, [
-              a('openPresentationLinkExternal', { class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.openLinkExternal'), href: function* () { return safeUrl((yield* activeLink()) ?? ''); }, target: '_blank', rel: 'noopener noreferrer', 'data-navigation': 'external' }, i18n.t('ui.presentation.openLinkExternal')),
-              button('closePresentationLink', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.closeLink'), click: activeLink.close }, i18n.t('ui.presentation.closeLink')),
-            ]),
-          ]),
-          div({ class: 'presentation-link-viewer__frame' }, [
-            iframe({ title: i18n.t('ui.presentation.linkViewer'), 'data-source': activeLink, loading: 'eager', referrerPolicy: 'no-referrer', sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin', allow: 'fullscreen; autoplay; picture-in-picture' }).pipe(embedPresentationLink),
           ]),
         ])),
       ]).pipe(focusPresentationStage),
