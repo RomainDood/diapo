@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "craft-ts": { "command": "npx", "args": ["craft-ts-mcp"] },
+    "craft-ts-logs": { "command": "npx", "args": ["craft-ts-log-mcp"] },
+    "craft-ts-registry": { "command": "npx", "args": ["craft-ts-registry-mcp"] }
+  }
+}

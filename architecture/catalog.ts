@@ -1,0 +1,108 @@
+// Generated. Do not edit.
+export const architectureCatalog = {
+  "version": 1,
+  "graphHash": "096a8ba57f72e125",
+  "routes": [
+    "editor/:presentationId",
+    "feature",
+    "present/:presentationId",
+    "presenter/:presentationId"
+  ],
+  "services": [
+    "PresentationStore"
+  ],
+  "components": [
+    "AnonymousComponent@154",
+    "App",
+    "DashboardPage",
+    "EditorPage"
+  ],
+  "primitives": [
+    "activeLink",
+    "addSection",
+    "addSequence",
+    "autosaveStatus",
+    "collapsedSectionIds",
+    "coverImageAlt",
+    "createPresentation",
+    "createPresentationAndRevealLink",
+    "createdPresentation",
+    "currentDocument",
+    "currentSectionIntention",
+    "currentSectionTitle",
+    "currentSlide",
+    "deleteSequence",
+    "handleImageFile",
+    "handleKeydown",
+    "hasActiveLink",
+    "hasCode",
+    "hasCoverImage",
+    "hasCreatedPresentation",
+    "hasDocument",
+    "hasImage",
+    "hasImageUploadNotice",
+    "highlightedCode",
+    "imageUploadError",
+    "imageUploadErrorMessage",
+    "imageUploadFailed",
+    "imageUploadNotice",
+    "imageUploading",
+    "isAutosaving",
+    "moveSection",
+    "newPresentationDraft",
+    "next",
+    "noteParts",
+    "notesVisible",
+    "openPresentationLink",
+    "overview",
+    "presentationDraft",
+    "presentationEditor",
+    "presentationStage",
+    "presentations",
+    "previous",
+    "progressPercent",
+    "publicNotesHidden",
+    "saveChanges",
+    "savePresentation",
+    "sectionNavigation",
+    "sectionViews",
+    "selectSlide",
+    "showStage",
+    "slideIndex",
+    "slideItems",
+    "slides",
+    "toggleNotes",
+    "toggleSection",
+    "updateAudience",
+    "updateCoverImageAlt",
+    "updateLayout",
+    "updateObjective",
+    "updateSection",
+    "updateSequence",
+    "updateTitle",
+    "uploadPresentationImage"
+  ],
+  "sources": [
+    "draftChanges (signalSource)"
+  ],
+  "serverFunctionFamilies": [],
+  "httpEndpoints": [],
+  "uniques": [],
+  "providers": [],
+  "routeProviders": {},
+  "componentProviders": {},
+  "providedOn": {},
+  "collisions": {
+    "services": {
+      "PresentationStore": [
+        "src/server/presentation-store.ts",
+        "src/server/presentation-store.ts"
+      ]
+    },
+    "components": {},
+    "routes": {}
+  },
+  "browserBoundaryServices": [],
+  "scopes": {}
+} as const;
+export type ArchitectureCatalog = typeof architectureCatalog;

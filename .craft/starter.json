@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "status": "domain",
+  "domain": "feature",
+  "frontendRuntime": "effect",
+  "backendRuntime": "none",
+  "i18n": "strict",
+  "locales": [
+    "en-US",
+    "fr-FR"
+  ],
+  "defaultLocale": "en-US",
+  "designSystem": "basic",
+  "typedCss": true
+}
