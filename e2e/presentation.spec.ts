@@ -30,6 +30,20 @@ test('keeps every part visible when an image URL is blocked', async ({ page }) =
   await expect(page.getByRole('button', { name: '+ Add a sequence' })).toHaveCount(2);
 });
 
+test('downloads the presentation in Markdown and YouTube formats', async ({ page }) => {
+  await page.goto('/editor/presentation-demo');
+
+  const markdownDownload = page.waitForEvent('download');
+  await page.getByLabel('Export format').selectOption('markdown');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  expect((await markdownDownload).suggestedFilename()).toBe('les-architectures-distribuees-notes.md');
+
+  const youtubeDownload = page.waitForEvent('download');
+  await page.getByLabel('Export format').selectOption('youtube');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  expect((await youtubeDownload).suggestedFilename()).toBe('les-architectures-distribuees-youtube.txt');
+});
+
 test('creates a subject, saves speaker notes, and reloads them', async ({ page }) => {
   await page.goto('/feature');
   const title = `E2E subject ${Date.now()}`;
@@ -228,17 +242,17 @@ test('lets the presenter move speaker notes on the desktop stage', async ({ page
   expect(movedNotesPosition).not.toEqual(initialNotesPosition);
 });
 
-test('lets the presenter move the overview title and topbar', async ({ page }) => {
+test('lets the presenter move the overview canvas and topbar', async ({ page }) => {
   await page.goto('/presenter/presentation-demo');
 
-  const overviewTitle = page.locator('.presentation-overview__title-drag-surface');
-  const titleBox = await overviewTitle.boundingBox();
-  expect(titleBox).not.toBeNull();
-  await page.mouse.move((titleBox?.x ?? 0) + (titleBox?.width ?? 0) / 2, (titleBox?.y ?? 0) + (titleBox?.height ?? 0) / 2);
+  const overviewCanvas = page.locator('.presentation-overview__canvas');
+  const canvasBox = await overviewCanvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  await page.mouse.move((canvasBox?.x ?? 0) + 24, (canvasBox?.y ?? 0) + 24);
   await page.mouse.down();
   await page.mouse.move(140, 180);
   await page.mouse.up();
-  await expect(overviewTitle).toHaveCSS('position', 'fixed');
+  await expect(overviewCanvas).toHaveCSS('position', 'fixed');
 
   const topbar = page.locator('.presentation-topbar');
   const brand = page.locator('.presentation-brand');

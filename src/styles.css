@@ -113,6 +113,9 @@ button, .button { font: inherit; font-size: var(--craft-font-size-button); line-
 .editor-shell { max-width: 1000px; }
 .editor-toolbar { position: sticky; top: 0; z-index: 5; padding: .7rem 0; background: #f7f8fbeb; backdrop-filter: blur(12px); }
 .editor-autosave-status { color: #c4b9d8; font-size: .8rem; font-weight: 700; }
+.editor-export-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.editor-export-select { max-width: 15rem; padding: .65rem .7rem; border: 1px solid #806aab; border-radius: .55rem; color: #f5f0ff; background: #21142f; font: inherit; font-size: .82rem; }
+.editor-export-select:focus { border-color: var(--app-brand-1); outline: 3px solid #8514f533; }
 .editor-loading-card { display: grid; gap: 1rem; min-height: 24rem; padding: clamp(1.15rem, 3vw, 2rem); border: 1px solid #dce3f0; border-radius: 1rem; background: linear-gradient(110deg, #fff 8%, #f1f4fa 18%, #fff 33%); background-size: 200% 100%; box-shadow: 0 .4rem 1.5rem #1720330d; animation: editor-loading-shimmer 1.4s linear infinite; }
 .editor-loading-card__bar, .editor-loading-card__line { border-radius: .55rem; background: #e3e8f2; }
 .editor-loading-card__bar { width: min(62%, 30rem); height: 3.5rem; }
@@ -196,11 +199,10 @@ button, .button { font: inherit; font-size: var(--craft-font-size-button); line-
 .presentation-link-viewer__frame { min-width: 0; min-height: 0; width: min(100%, 1280px); margin: 0 auto; border: 1px solid #bab2eb55; border-radius: 1rem; background: #fff; box-shadow: 0 2rem 7rem #0008; overflow: hidden; animation: presentation-link-viewer-frame-enter .55s .05s cubic-bezier(.2,.8,.2,1) both; }
 .presentation-link-viewer__frame iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 .presentation-overview { position: relative; display: grid; min-height: min(78vh, 760px); max-width: 1280px; margin: 1rem auto 0; padding: clamp(2rem, 6vw, 5rem); border: 1px solid #bab2eb33; border-radius: 1.5rem; background: linear-gradient(135deg, #10051cdd, #211047cc), radial-gradient(circle at 75% 20%, #f736e355, transparent 32%), linear-gradient(135deg, #211047, #8514f5 60%, #e90464); box-shadow: 0 2rem 7rem #10051c; overflow: hidden; }
-.presentation-overview__canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.presentation-overview__canvas { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; cursor: grab; pointer-events: auto; touch-action: none; }
+.presentation-overview__canvas[data-dragging='true'] { cursor: grabbing; }
 .presentation-overview__content { position: relative; z-index: 1; display: grid; justify-items: center; min-width: 0; gap: .8rem; max-width: 54rem; margin: 0 auto 2rem; text-align: center; }
 .presentation-overview__image { width: min(100%, 34rem); max-height: 12rem; border: 1px solid #bab2eb66; border-radius: 1rem; object-fit: cover; box-shadow: 0 1rem 3rem #10051c88; }
-.presentation-overview__title-drag-surface { min-width: 0; width: 100%; max-width: 52rem; cursor: grab; touch-action: none; user-select: none; }
-.presentation-overview__title-drag-surface[data-dragging='true'] { cursor: grabbing; }
 .presentation-overview__title { min-width: 0; max-width: 52rem; margin: 0; font-size: clamp(3rem, 8vw, 7.6rem); line-height: .92; letter-spacing: -.065em; overflow-wrap: anywhere; text-wrap: balance; }
 .presentation-overview__objective { max-width: 42rem; margin: 0; color: #eeeaff; font-size: clamp(1.05rem, 2vw, 1.45rem); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .presentation-overview__hint { color: #d8d0ff; font-size: .85rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }

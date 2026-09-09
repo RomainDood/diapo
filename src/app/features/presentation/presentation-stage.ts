@@ -120,8 +120,9 @@ const dragPresentationSurface = craftNodeDirective(
       offsetY = event.clientY - bounds.top;
       surface.dataset.dragging = 'true';
       surface.style.position = 'fixed';
-      surface.style.zIndex = '12';
+      surface.style.zIndex = handle.dataset.dragSurface === 'canvas' ? '0' : '12';
       surface.style.width = `${bounds.width}px`;
+      surface.style.height = `${bounds.height}px`;
       surface.style.margin = '0';
       handle.setPointerCapture(event.pointerId);
       event.preventDefault();
@@ -314,14 +315,12 @@ function createPresentationPage(name: string, presenterMode: boolean) {
             ]).pipe(dragPresentationSurface),
         ifNode(presentation.isLoading, () => p({ class: 'presentation-loading' }, i18n.t('ui.presentation.loading'))),
         ifNode(overview, () => section({ class: 'presentation-overview', 'aria-labelledby': 'presentationOverviewTitle' }, [
-          h('canvas', { class: 'presentation-overview__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
+          h('canvas', { class: 'presentation-overview__canvas', 'data-drag-surface': 'canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop).pipe(dragPresentationSurface),
           div({ class: 'presentation-overview__content' }, [
             // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
             ifNode(hasCoverImage, () => img({ class: 'presentation-overview__image', src: function* () { return safePresentationImageUrl((yield* presentation.value())?.coverImageUrl ?? ''); }, alt: function* () { return (yield* presentation.value())?.coverImageAlt || i18n.t('ui.editor.coverImageAltFallback'); } })),
             span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.overview')),
-            div({ class: 'presentation-overview__title-drag-surface' }, [
-              heading({ id: 'presentationOverviewTitle', class: 'presentation-overview__title' }, function* () { return (yield* presentation.value())?.title ?? ''; }),
-            ]).pipe(dragPresentationSurface),
+            heading({ id: 'presentationOverviewTitle', class: 'presentation-overview__title' }, function* () { return (yield* presentation.value())?.title ?? ''; }),
             p({ class: 'presentation-overview__objective' }, function* () { return (yield* presentation.value())?.objective ?? ''; }),
             span({ class: 'presentation-overview__hint' }, i18n.t('ui.presentation.overviewHint')),
           ]),

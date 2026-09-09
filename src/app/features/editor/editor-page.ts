@@ -40,6 +40,9 @@ import {
   PRESENTATION_IMAGE_MIME_TYPES,
   PRESENTATION_INTENTIONS,
   PRESENTATION_TRANSITIONS,
+  formatPresentationAsMarkdown,
+  formatPresentationForYouTube,
+  presentationExportFilename,
 } from '../../../shared/presentation';
 import type {
   PresentationDocument,
@@ -52,6 +55,7 @@ import type {
   PresentationSection,
   PresentationStoreInput,
   PresentationTransition,
+  PresentationExportFormat,
 } from '../../../shared/presentation';
 import { eventValue } from '../../event-value';
 
@@ -141,6 +145,26 @@ const readPresentationImageFile = craftNodeDirective(
   },
 );
 
+const downloadPresentationExport = craftNodeDirective(
+  'downloadPresentationExport',
+  [],
+  ({ element }) => {
+    const buttonElement = element as HTMLButtonElement;
+    const download = () => {
+      const document = buttonElement.ownerDocument;
+      const url = document.defaultView?.URL.createObjectURL(new Blob([buttonElement.dataset.exportContent ?? ''], { type: 'text/plain;charset=utf-8' }));
+      if (!url) return;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = buttonElement.dataset.exportFilename ?? 'presentation.txt';
+      link.click();
+      document.defaultView?.setTimeout(() => document.defaultView?.URL.revokeObjectURL(url), 0);
+    };
+    buttonElement.addEventListener('click', download);
+    return () => buttonElement.removeEventListener('click', download);
+  },
+);
+
 function toStoreInput(document: PresentationDocument): PresentationStoreInput {
   return {
     layout: document.layout,
@@ -171,6 +195,9 @@ export const EditorPage = craftComponent(
       toggle: (sectionId: string) => update((ids) => ids.includes(sectionId)
         ? ids.filter((id) => id !== sectionId)
         : [...ids, sectionId]),
+    }));
+    const exportFormat = yield* state('exportFormat', 'markdown' as PresentationExportFormat, ({ set }) => ({
+      setFormat: (value: PresentationExportFormat) => set(value),
     }));
     const draftChanges = signalSource<PresentationStoreInput>('draftChanges');
     const save = yield* mutation('savePresentation', {
@@ -205,6 +232,16 @@ export const EditorPage = craftComponent(
     });
     const currentDocument = craftComputed('currentDocument', function* () {
       return (yield* draft()) ?? (yield* presentation.value()) ?? EMPTY_DOCUMENT;
+    });
+    const exportContent = craftComputed('exportContent', function* () {
+      const document = yield* currentDocument();
+      return (yield* exportFormat()) === 'markdown'
+        ? formatPresentationAsMarkdown(document)
+        : formatPresentationForYouTube(document);
+    });
+    const exportFilename = craftComputed('exportFilename', function* () {
+      const document = yield* currentDocument();
+      return presentationExportFilename(document.title, yield* exportFormat());
     });
     const hasDocument = craftComputed('hasDocument', function* () {
       return (yield* draft()) !== undefined || (yield* presentation.value()) !== undefined;
@@ -409,6 +446,9 @@ export const EditorPage = craftComponent(
     return {
       presentation,
       currentDocument,
+      exportFormat,
+      exportContent,
+      exportFilename,
       hasDocument,
       hasCoverImage,
       coverImageAlt,
@@ -440,13 +480,20 @@ export const EditorPage = craftComponent(
       presentationId,
     };
   },
-  ({ presentation, currentDocument, hasDocument, hasCoverImage, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateSection, updateSequence, sectionViews, toggleSection, moveSection, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
+  ({ presentation, currentDocument, hasDocument, exportFormat, exportContent, exportFilename, hasCoverImage, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateSection, updateSequence, sectionViews, toggleSection, moveSection, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
     div({ class: 'editor-shell' }, [
       div({ class: 'editor-toolbar' }, [
           a('backToDashboard', { class: 'studio-link', 'aria-label': i18n.t('ui.editor.backToDashboard'), 'data-navigation': 'external', href: '/feature' }, i18n.t('ui.editor.backToDashboard')),
         div({ class: 'studio-toolbar' }, [
           ifNode(hasDocument, () => span({ class: 'editor-autosave-status' }, autosaveStatus)),
           ifNode(hasDocument, () => button('savePresentation', { type: 'button', class: 'studio-button', 'aria-label': i18n.t('ui.editor.save'), disabled: isAutosaving, click: saveChanges }, i18n.t('ui.editor.save'))),
+          ifNode(hasDocument, () => div({ class: 'editor-export-controls' }, [
+            select('presentationExportFormat', { 'aria-label': i18n.t('ui.editor.exportFormatLabel'), class: 'editor-export-select', value: exportFormat, *change(event) { yield* exportFormat.setFormat(eventValue(event) as PresentationExportFormat); } }, [
+              option({ value: 'markdown' }, i18n.t('ui.editor.exportMarkdown')),
+              option({ value: 'youtube' }, i18n.t('ui.editor.exportYouTube')),
+            ]),
+            button('exportPresentation', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.export'), 'data-export-content': exportContent, 'data-export-filename': exportFilename }, i18n.t('ui.editor.export')).pipe(downloadPresentationExport),
+          ])),
           ifNode(hasDocument, () => a('editorPresentPresentation', { class: 'studio-button studio-button--primary', 'aria-label': i18n.t('ui.editor.present'), 'data-navigation': 'external', href: function* () { return `/present/${yield* presentationId()}`; }, click: saveChanges }, i18n.t('ui.editor.present'))),
         ]),
       ]),

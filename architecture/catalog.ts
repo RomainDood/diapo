@@ -1,7 +1,7 @@
 // Generated. Do not edit.
 export const architectureCatalog = {
   "version": 1,
-  "graphHash": "096a8ba57f72e125",
+  "graphHash": "4713b155c531bfac",
   "routes": [
     "editor/:presentationId",
     "feature",
@@ -12,7 +12,7 @@ export const architectureCatalog = {
     "PresentationStore"
   ],
   "components": [
-    "AnonymousComponent@154",
+    "AnonymousComponent@155",
     "App",
     "DashboardPage",
     "EditorPage"
@@ -32,6 +32,9 @@ export const architectureCatalog = {
     "currentSectionTitle",
     "currentSlide",
     "deleteSequence",
+    "exportContent",
+    "exportFilename",
+    "exportFormat",
     "handleImageFile",
     "handleKeydown",
     "hasActiveLink",
