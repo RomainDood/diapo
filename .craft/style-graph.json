@@ -218,6 +218,34 @@
       "role": "surface"
     },
     {
+      "name": "--presentationGradient-angle",
+      "syntax": "<angle>",
+      "inherits": true,
+      "initialValue": "135deg",
+      "role": "none"
+    },
+    {
+      "name": "--presentationGradient-end",
+      "syntax": "<color>",
+      "inherits": true,
+      "initialValue": "#5c44e4",
+      "role": "accent"
+    },
+    {
+      "name": "--presentationGradient-middle",
+      "syntax": "<color>",
+      "inherits": true,
+      "initialValue": "#ffffff",
+      "role": "surface"
+    },
+    {
+      "name": "--presentationGradient-start",
+      "syntax": "<color>",
+      "inherits": true,
+      "initialValue": "#fbfaff",
+      "role": "surface"
+    },
+    {
       "name": "--presentationProgress-value",
       "syntax": "<percentage>",
       "inherits": false,

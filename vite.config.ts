@@ -10,8 +10,8 @@ import {
   PresentationImageError,
 } from './src/server/presentation-images';
 import {
-  PRESENTATION_IMAGE_MIME_TYPES,
-  type PresentationImageMimeType,
+  PRESENTATION_MEDIA_MIME_TYPES,
+  type PresentationMediaMimeType,
   type PresentationImageUploadInput,
 } from './src/shared/presentation';
 
@@ -74,10 +74,10 @@ function readImageUploadInput(value: unknown): PresentationImageUploadInput | un
   if (!value || typeof value !== 'object') return undefined;
   const input = value as Record<string, unknown>;
   if (typeof input.filename !== 'string' || typeof input.mimeType !== 'string' || typeof input.dataUrl !== 'string') return undefined;
-  if (!PRESENTATION_IMAGE_MIME_TYPES.includes(input.mimeType as PresentationImageMimeType)) return undefined;
+  if (!PRESENTATION_MEDIA_MIME_TYPES.includes(input.mimeType as PresentationMediaMimeType)) return undefined;
   return {
     filename: input.filename,
-    mimeType: input.mimeType as PresentationImageMimeType,
+    mimeType: input.mimeType as PresentationMediaMimeType,
     dataUrl: input.dataUrl,
   };
 }
@@ -96,14 +96,14 @@ function presentationImagesPlugin() {
           void readJsonBody(request).then((body) => {
             const input = readImageUploadInput(body);
             if (!input) {
-              sendJson(response, 400, { error: 'A supported image is required.' });
+              sendJson(response, 400, { error: 'A supported image or video is required.' });
               return;
             }
             try {
               sendJson(response, 201, imageStore.save(input));
             } catch (error: unknown) {
               const status = error instanceof PresentationImageError ? 400 : 500;
-              sendJson(response, status, { error: error instanceof Error ? error.message : 'Unable to store the image.' });
+              sendJson(response, status, { error: error instanceof Error ? error.message : 'Unable to store the media.' });
             }
           });
           return;
@@ -112,7 +112,7 @@ function presentationImagesPlugin() {
         if (request.method === 'GET' && imageMatch?.[1]) {
           const image = imageStore.read(imageMatch[1]);
           if (!image) {
-            sendJson(response, 404, { error: 'Image not found.' });
+            sendJson(response, 404, { error: 'Media not found.' });
             return;
           }
           response.statusCode = 200;

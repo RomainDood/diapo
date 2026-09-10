@@ -1,4 +1,4 @@
-import { CraftHttpClient, response } from '@craft-ts/core';
+import { CraftHttpClient, craftUntilSettled, response } from '@craft-ts/core';
 import type {
   CreatePresentationInput,
   PresentationDocument,
@@ -55,10 +55,13 @@ export function* savePresentation(id: string, input: PresentationStoreInput) {
 }
 
 export function* uploadPresentationImage(id: string, input: PresentationImageUploadInput) {
-  const request = yield* CraftHttpClient.post(() => ({
-    url: `/api/presentations/${id}/images`,
-    payload: input,
-    success: response<PresentationImageUpload>(),
-  }));
-  return request as unknown as PresentationImageUpload;
+  // Unlike query/mutation loaders, this caller needs the JSON body before its
+  // own loader can update the draft, so explicitly await the HTTP descriptor.
+  return yield* craftUntilSettled(
+    CraftHttpClient.post(({ response }) => ({
+      url: `/api/presentations/${id}/images`,
+      payload: input,
+      success: response<PresentationImageUpload>(),
+    })),
+  );
 }

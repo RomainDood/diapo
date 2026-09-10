@@ -20,20 +20,38 @@ import {
   type Input,
 } from '@craft-ts/component';
 import { assign, num, unit } from '@craft-ts/style';
+import type { ColorValue } from '@craft-ts/style';
 import { craftComputed, craftMethod, craftNodeDirective, query, state } from '@craft-ts/core';
 import { i18n } from '../../../i18n';
 import { loadPresentation } from '../../api';
-import { PRESENTATION_IMAGE_ALLOWED_ORIGINS } from '../../../shared/presentation';
+import { PRESENTATION_IMAGE_ALLOWED_ORIGINS, PRESENTATION_THEME_GRADIENTS } from '../../../shared/presentation';
 import type { PresentationSequence } from '../../../shared/presentation';
 import { highlightCodeTokens } from './code-highlighter';
 import { extractPresentationNoteParts } from './presentation-links';
-import { presentationProgressVars, presentationSlideVars } from '../../ui/ui.style';
+import { presentationGradientVars, presentationProgressVars, presentationSlideVars } from '../../ui/ui.style';
 import { threePresentationBackdrop } from './presentation-visual';
+
+function cssColor(value: string): ColorValue {
+  return { css: value, dark: value, role: 'none', unproven: '' } as ColorValue;
+}
 
 function safePresentationImageUrl(url: string): string {
   if (!url) return '';
   try {
     return safeResourceUrl(url, { allowedOrigins: PRESENTATION_IMAGE_ALLOWED_ORIGINS });
+  } catch {
+    return '';
+  }
+}
+
+function safePresentationMediaUrl(url: string): string {
+  if (!url) return '';
+  try {
+    if (url.startsWith('/')) return safeResourceUrl(url, { allowedOrigins: PRESENTATION_IMAGE_ALLOWED_ORIGINS });
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    const safeUrlValue = safeUrl(url);
+    return safeResourceUrl(safeUrlValue, { allowedOrigins: [parsed.origin] });
   } catch {
     return '';
   }
@@ -71,6 +89,15 @@ const EMPTY_SLIDE: PresentationSequence = {
   imageUrl: '',
   imageAlt: '',
 };
+
+type PresentationImageViewer = {
+  url: string;
+  alt: string;
+};
+
+function clampImageViewerZoom(value: number): number {
+  return Math.min(Math.max(value, 1), 4);
+}
 
 const focusPresentationStage = craftNodeDirective(
   'focusPresentationStage',
@@ -141,6 +168,116 @@ const dragPresentationSurface = craftNodeDirective(
   },
 );
 
+const imageViewerInteraction = craftNodeDirective(
+  'imageViewerInteraction',
+  [],
+  ({ element }) => {
+    const viewer = element as HTMLElement;
+    let cleanup: (() => void) | undefined;
+    let disposed = false;
+    queueMicrotask(() => {
+      if (disposed) return;
+      const viewport = viewer.querySelector<HTMLElement>('.presentation-image-viewer__viewport');
+      const image = viewer.querySelector<HTMLImageElement>('.presentation-image-viewer__image');
+      if (!viewport || !image) return;
+
+      let zoom = 1;
+      let offsetX = 0;
+      let offsetY = 0;
+      let dragging = false;
+      let lastX = 0;
+      let lastY = 0;
+
+      const clampOffset = () => {
+      const bounds = viewport.getBoundingClientRect();
+      const maxX = Math.max(0, (image.offsetWidth * zoom - bounds.width) / 2);
+      const maxY = Math.max(0, (image.offsetHeight * zoom - bounds.height) / 2);
+      offsetX = Math.min(Math.max(offsetX, -maxX), maxX);
+      offsetY = Math.min(Math.max(offsetY, -maxY), maxY);
+      };
+      const update = () => {
+      clampOffset();
+      image.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${zoom})`;
+      viewer.dataset.zoomed = String(zoom > 1);
+      const zoomLabel = viewer.querySelector<HTMLElement>('.presentation-image-viewer__zoom-value');
+      if (zoomLabel) zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+      };
+      const setZoom = (value: number) => {
+      zoom = clampImageViewerZoom(value);
+      if (zoom === 1) {
+        offsetX = 0;
+        offsetY = 0;
+      }
+      update();
+      };
+      const onImageLoad = () => update();
+      const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      setZoom(zoom + (event.deltaY < 0 ? 0.25 : -0.25));
+      };
+      const onPointerDown = (event: PointerEvent) => {
+      if (zoom === 1 || event.button !== 0) return;
+      dragging = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      viewer.dataset.dragging = 'true';
+      image.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      };
+      const onPointerMove = (event: PointerEvent) => {
+      if (!dragging) return;
+      offsetX += event.clientX - lastX;
+      offsetY += event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      update();
+      };
+      const stopDragging = (event: PointerEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      viewer.dataset.dragging = 'false';
+      if (image.hasPointerCapture(event.pointerId)) image.releasePointerCapture(event.pointerId);
+      };
+      const onDoubleClick = () => setZoom(zoom === 1 ? 2 : 1);
+      const onControlClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const control = target.closest<HTMLElement>('[data-image-viewer-action]');
+      if (!control || !viewer.contains(control)) return;
+      const action = control.dataset.imageViewerAction;
+      if (action === 'zoom-in') setZoom(zoom + 0.25);
+      else if (action === 'zoom-out') setZoom(zoom - 0.25);
+      else if (action === 'reset') setZoom(1);
+      };
+
+      image.addEventListener('load', onImageLoad);
+      viewport.addEventListener('wheel', onWheel, { passive: false });
+      image.addEventListener('pointerdown', onPointerDown);
+      image.addEventListener('pointermove', onPointerMove);
+      image.addEventListener('pointerup', stopDragging);
+      image.addEventListener('pointercancel', stopDragging);
+      image.addEventListener('dblclick', onDoubleClick);
+      viewer.addEventListener('click', onControlClick);
+      update();
+
+      cleanup = () => {
+        image.removeEventListener('load', onImageLoad);
+        viewport.removeEventListener('wheel', onWheel);
+        image.removeEventListener('pointerdown', onPointerDown);
+        image.removeEventListener('pointermove', onPointerMove);
+        image.removeEventListener('pointerup', stopDragging);
+        image.removeEventListener('pointercancel', stopDragging);
+        image.removeEventListener('dblclick', onDoubleClick);
+        viewer.removeEventListener('click', onControlClick);
+      };
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  },
+);
+
 const embedPresentationLink = craftNodeDirective(
   'embedPresentationLink',
   [],
@@ -173,6 +310,10 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         open: (url: string) => set(url),
         close: () => set(null),
       }));
+      const imageViewer = yield* state('imageViewer', null as PresentationImageViewer | null, ({ set }) => ({
+        open: (value: PresentationImageViewer) => set(value),
+        close: () => set(null),
+      }));
       const overview = yield* state('overview', true, ({ set }) => ({
         show: () => set(true),
         hide: () => set(false),
@@ -186,8 +327,34 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       const hasCoverImage = craftComputed('hasCoverImage', function* () {
         return Boolean((yield* presentation.value())?.coverImageUrl);
       });
+      const hasBackgroundImage = craftComputed('hasBackgroundImage', function* () {
+        const document = yield* presentation.value();
+        return document?.backgroundType === 'image' && Boolean(document.backgroundUrl);
+      });
+      const hasBackgroundVideo = craftComputed('hasBackgroundVideo', function* () {
+        const document = yield* presentation.value();
+        return document?.backgroundType === 'video' && Boolean(document.backgroundUrl);
+      });
       const showStage = craftComputed('showStage', function* () {
         return !(yield* overview());
+      });
+      const hasImageViewer = craftComputed('hasImageViewer', function* () {
+        return Boolean(yield* imageViewer());
+      });
+      const presentationGradientStyle = craftComputed('presentationGradientStyle', function* () {
+        const document = yield* presentation.value();
+        const gradient = document ?? {
+          backgroundGradientStart: PRESENTATION_THEME_GRADIENTS.aurora.start,
+          backgroundGradientMiddle: PRESENTATION_THEME_GRADIENTS.aurora.middle,
+          backgroundGradientEnd: PRESENTATION_THEME_GRADIENTS.aurora.end,
+          backgroundGradientAngle: PRESENTATION_THEME_GRADIENTS.aurora.angle,
+        };
+        return {
+          ...assign(presentationGradientVars.start, cssColor(gradient.backgroundGradientStart)),
+          ...assign(presentationGradientVars.middle, cssColor(gradient.backgroundGradientMiddle)),
+          ...assign(presentationGradientVars.end, cssColor(gradient.backgroundGradientEnd)),
+          ...assign(presentationGradientVars.angle, unit.deg(gradient.backgroundGradientAngle)),
+        };
       });
       const slides = craftComputed('slides', function* () {
         const document = yield* presentation.value();
@@ -265,7 +432,22 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         const current = yield* slideIndex();
         if (current > 0) yield* slideIndex.setIndex(current - 1);
       });
+      const openImageViewer = craftMethod('openImageViewer', function* () {
+        const slide = yield* currentSlide();
+        const url = safePresentationImageUrl(slide.imageUrl);
+        if (url) yield* imageViewer.open({ url, alt: slide.imageAlt || i18n.t('ui.editor.imageAltFallback') });
+      });
+      const closeImageViewer = craftMethod('closeImageViewer', function* () {
+        yield* imageViewer.close();
+      });
       const handleKeydown = craftMethod('handleKeydown', function* (event: KeyboardEvent) {
+        if (yield* imageViewer()) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            yield* imageViewer.close();
+          }
+          return;
+        }
         if (yield* activeLink()) {
           if (event.key === 'Escape') {
             event.preventDefault();
@@ -314,10 +496,14 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         if (!(yield* linkReturnState())) yield* overview.hide();
         yield* linkReturnState.clear();
       });
-      return { presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, presentationId };
+      return { presentation, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, presentationGradientStyle, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, imageViewer, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, openImageViewer, closeImageViewer, presentationId };
     },
-    ({ presentation, overview, hasCoverImage, showStage, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, slideItems, next, previous, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, handleKeydown, presentationId }) =>
-      div({ class: 'presentation-shell', 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
+    ({ presentation, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, presentationGradientStyle, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, imageViewer, slideItems, next, previous, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, openImageViewer, closeImageViewer, handleKeydown, presentationId }) =>
+      div({ class: 'presentation-shell', style: presentationGradientStyle, 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-theme': function* () { return (yield* presentation.value())?.backgroundTheme ?? 'aurora'; }, 'data-background-type': function* () { return (yield* presentation.value())?.backgroundType ?? 'theme'; }, 'data-decoration': function* () { return (yield* presentation.value())?.backgroundDecoration ?? 'orb'; }, 'data-decoration-color': function* () { return (yield* presentation.value())?.backgroundDecorationColor ?? '#f736e3'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
+        // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationMediaUrl validates the protocol and origin.
+        ifNode(hasBackgroundImage, () => img({ class: 'presentation-background-media', src: function* () { return safePresentationMediaUrl((yield* presentation.value())?.backgroundUrl ?? ''); }, alt: '' })),
+        // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationMediaUrl validates the protocol and origin.
+        ifNode(hasBackgroundVideo, () => h('video', { class: 'presentation-background-media', src: function* () { return safePresentationMediaUrl((yield* presentation.value())?.backgroundUrl ?? ''); }, autoplay: true, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-hidden': true })),
         div({ class: 'presentation-topbar', 'data-drag-surface': 'topbar' }, presenterMode
           ? [
               a('publicView', { class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.publicView'), 'data-navigation': 'external', href: function* () { return `/present/${yield* presentationId()}`; } }, i18n.t('ui.presentation.publicView')),
@@ -369,6 +555,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
           ]),
         ]).pipe(dragPresentationSurface)),
         ifNode(showStage, () => section({ class: 'presentation-stage', tabIndex: -1 }, [
+          h('canvas', { class: 'presentation-stage__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
           div({ class: 'presentation-stage__glow' }),
           forNode(
             slideItems,
@@ -380,28 +567,42 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               heading({ class: 'presentation-stage__title', 'aria-label': i18n.t('ui.presentation.currentSlide') }, function* () { return (yield* currentSlide()).title; }),
               p({ class: 'presentation-stage__message' }, function* () { return (yield* currentSlide()).message; }),
               // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
-              ifNode(hasImage, () => img({ class: 'presentation-stage__image', src: function* () { return safePresentationImageUrl((yield* currentSlide()).imageUrl); }, alt: function* () { return (yield* currentSlide()).imageAlt || i18n.t('ui.editor.imageAltFallback'); } })),
+              ifNode(hasImage, () => button('openImageViewer', { type: 'button', class: 'presentation-stage__image-trigger', 'aria-label': i18n.t('ui.presentation.openImageViewer'), title: i18n.t('ui.presentation.openImageViewer'), click: openImageViewer }, img({ class: 'presentation-stage__image', src: function* () { return safePresentationImageUrl((yield* currentSlide()).imageUrl); }, alt: function* () { return (yield* currentSlide()).imageAlt || i18n.t('ui.editor.imageAltFallback'); } }))),
               ifNode(hasCode, () => pre('slideCode', { class: 'presentation-code', 'data-language': function* () { return (yield* currentSlide()).codeLanguage; } }, forNode(highlightedCode, { track: (token) => token.id }, (tokenInput) => span({ class: function* () { return (yield* tokenInput()).className; } }, function* () { return (yield* tokenInput()).text; })))),
-              span({ class: 'presentation-stage__duration' }, function* () { return `${(yield* currentSlide()).durationMinutes} min · ${(yield* currentSlide()).transition}`; }),
             ]),
           ),
           div({ class: 'presentation-stage__controls' }, [
-            button('previousSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.previous'), class: 'presentation-control', disabled: function* () { return (yield* slideIndex()) === 0; }, click: previous }, i18n.t('ui.presentation.previous')),
-            div({ class: 'presentation-navigation-center' }, [
-              div({ class: 'presentation-carousel', role: 'list', 'aria-label': i18n.t('ui.presentation.presentationOutline') }, [
-                forNode(sectionNavigation, { track: (part) => part.id }, (partInput) => div({ class: 'presentation-carousel__group' }, [
-                  button('carouselSection', { type: 'button', class: 'presentation-carousel__part', 'data-active': function* () { return String((yield* slideIndex()) >= (yield* partInput()).firstSlideIndex && (yield* slideIndex()) < (yield* partInput()).firstSlideIndex + (yield* partInput()).sequences.length); }, click: function* () { yield* selectSlide((yield* partInput()).firstSlideIndex); } }, function* () { return (yield* partInput()).title; }),
-                  forNode(function* () { return (yield* partInput()).sequences; }, { track: (sequence) => sequence.id }, (sequenceInput) => button('carouselSequence', { type: 'button', class: 'presentation-carousel__sequence', 'data-active': function* () { return String((yield* sequenceInput()).slideIndex === (yield* slideIndex())); }, click: function* () { yield* selectSlide((yield* sequenceInput()).slideIndex); } }, function* () { return (yield* sequenceInput()).title; })),
-                ])),
-              ]),
-              div({ class: 'presentation-progress' }, [
-                div({ class: 'presentation-progress__track', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': progressPercent }, div({ class: 'presentation-progress__fill', style: function* () { return assign(presentationProgressVars.value, unit.pct(yield* progressPercent())); } })),
-                span(function* () { return `${(yield* slideIndex()) + 1} / ${(yield* slides()).length}`; }),
+            button('previousSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.previous'), title: i18n.t('ui.presentation.previous'), class: 'presentation-control presentation-control--icon', disabled: function* () { return (yield* slideIndex()) === 0; }, click: previous }, span({ 'aria-hidden': true }, '←')),
+            div({ class: 'presentation-carousel', role: 'list', 'aria-label': i18n.t('ui.presentation.presentationOutline') }, [
+              forNode(sectionNavigation, { track: (part) => part.id }, (partInput) => [
+                button('carouselSection', { type: 'button', class: 'presentation-carousel__part', 'data-active': function* () { return String((yield* slideIndex()) >= (yield* partInput()).firstSlideIndex && (yield* slideIndex()) < (yield* partInput()).firstSlideIndex + (yield* partInput()).sequences.length); }, click: function* () { yield* selectSlide((yield* partInput()).firstSlideIndex); } }, function* () { return (yield* partInput()).title; }),
+                forNode(function* () { return (yield* partInput()).sequences; }, { track: (sequence) => sequence.id }, (sequenceInput) => button('carouselSequence', { type: 'button', class: 'presentation-carousel__sequence', 'data-active': function* () { return String((yield* sequenceInput()).slideIndex === (yield* slideIndex())); }, click: function* () { yield* selectSlide((yield* sequenceInput()).slideIndex); } }, function* () { return (yield* sequenceInput()).title; })),
               ]),
             ]),
-            button('nextSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.next'), class: 'presentation-control presentation-control--primary', disabled: function* () { return (yield* slideIndex()) >= (yield* slides()).length - 1; }, click: next }, i18n.t('ui.presentation.next')),
+            div({ class: 'presentation-progress' }, [
+              div({ class: 'presentation-progress__track', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': progressPercent }, div({ class: 'presentation-progress__fill', style: function* () { return assign(presentationProgressVars.value, unit.pct(yield* progressPercent())); } })),
+              span(function* () { return `${(yield* slideIndex()) + 1} / ${(yield* slides()).length}`; }),
+            ]),
+            button('nextSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.next'), title: i18n.t('ui.presentation.next'), class: 'presentation-control presentation-control--icon', disabled: function* () { return (yield* slideIndex()) >= (yield* slides()).length - 1; }, click: next }, span({ 'aria-hidden': true }, '→')),
           ]),
         ]).pipe(focusPresentationStage)),
+        ifNode(hasImageViewer, () => div({ class: 'presentation-image-viewer', role: 'dialog', 'aria-modal': true, 'aria-label': i18n.t('ui.presentation.imageViewer'), tabIndex: -1 }, [
+          div({ class: 'presentation-image-viewer__toolbar' }, [
+            span({ class: 'presentation-image-viewer__title' }, i18n.t('ui.presentation.imageViewer')),
+            div({ class: 'presentation-image-viewer__actions' }, [
+              button('zoomOutImage', { type: 'button', class: 'presentation-image-viewer__control', 'data-image-viewer-action': 'zoom-out', 'aria-label': i18n.t('ui.presentation.zoomOut'), title: i18n.t('ui.presentation.zoomOut') }, '−'),
+              span({ class: 'presentation-image-viewer__zoom-value', 'aria-live': 'polite' }, '100%'),
+              button('zoomInImage', { type: 'button', class: 'presentation-image-viewer__control', 'data-image-viewer-action': 'zoom-in', 'aria-label': i18n.t('ui.presentation.zoomIn'), title: i18n.t('ui.presentation.zoomIn') }, '+'),
+              button('resetImageZoom', { type: 'button', class: 'presentation-image-viewer__control presentation-image-viewer__control--reset', 'data-image-viewer-action': 'reset', 'aria-label': i18n.t('ui.presentation.resetZoom'), title: i18n.t('ui.presentation.resetZoom') }, '↺'),
+              button('closeImageViewer', { type: 'button', class: 'presentation-image-viewer__control presentation-image-viewer__control--close', 'aria-label': i18n.t('ui.presentation.closeImageViewer'), title: i18n.t('ui.presentation.closeImageViewer'), click: closeImageViewer }, '×'),
+            ]),
+          ]),
+          div({ class: 'presentation-image-viewer__viewport' }, [
+            // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
+            img({ class: 'presentation-image-viewer__image', src: function* () { return (yield* imageViewer())?.url ?? ''; }, alt: function* () { return (yield* imageViewer())?.alt ?? ''; }, draggable: false }),
+          ]),
+          p({ class: 'presentation-image-viewer__hint' }, i18n.t('ui.presentation.imageZoomHint')),
+        ]).pipe(imageViewerInteraction)),
         ifNode(showNotes, () => section({ class: 'presentation-notes' }, [
           div({ class: 'presentation-notes__header' }, [
             span({ class: 'studio-panel__label' }, i18n.t('ui.presentation.speakerNotes')),

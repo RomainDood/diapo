@@ -3,17 +3,19 @@ import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   PRESENTATION_IMAGE_MAX_BYTES,
-  PRESENTATION_IMAGE_MIME_TYPES,
-  type PresentationImageMimeType,
+  PRESENTATION_MEDIA_MIME_TYPES,
+  type PresentationMediaMimeType,
   type PresentationImageUpload,
   type PresentationImageUploadInput,
 } from '../shared/presentation';
 
-const EXTENSIONS: Record<PresentationImageMimeType, string> = {
+const EXTENSIONS: Record<PresentationMediaMimeType, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
   'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
 };
 
 export class PresentationImageError extends Error {
@@ -25,17 +27,17 @@ export class PresentationImageError extends Error {
 
 export type StoredPresentationImage = {
   readonly bytes: Buffer;
-  readonly mimeType: PresentationImageMimeType;
+  readonly mimeType: PresentationMediaMimeType;
 };
 
-function isMimeType(value: string): value is PresentationImageMimeType {
-  return PRESENTATION_IMAGE_MIME_TYPES.includes(value as PresentationImageMimeType);
+function isMimeType(value: string): value is PresentationMediaMimeType {
+  return PRESENTATION_MEDIA_MIME_TYPES.includes(value as PresentationMediaMimeType);
 }
 
-function decodeDataUrl(dataUrl: string, mimeType: PresentationImageMimeType): Buffer {
+function decodeDataUrl(dataUrl: string, mimeType: PresentationMediaMimeType): Buffer {
   const prefix = `data:${mimeType};base64,`;
   if (!dataUrl.startsWith(prefix)) {
-    throw new PresentationImageError('The image payload is not a supported base64 data URL.');
+    throw new PresentationImageError('The media payload is not a supported base64 data URL.');
   }
 
   const base64 = dataUrl.slice(prefix.length);
@@ -45,7 +47,7 @@ function decodeDataUrl(dataUrl: string, mimeType: PresentationImageMimeType): Bu
 
   const bytes = Buffer.from(base64, 'base64');
   if (bytes.length === 0 || bytes.length > PRESENTATION_IMAGE_MAX_BYTES) {
-    throw new PresentationImageError('Images must be smaller than 8 MB.');
+    throw new PresentationImageError('Media files must be smaller than 8 MB.');
   }
   return bytes;
 }

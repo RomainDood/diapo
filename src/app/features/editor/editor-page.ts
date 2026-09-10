@@ -22,6 +22,7 @@ import {
 import {
   afterRecomputation,
   asyncProcess,
+  Console,
   craftNodeDirective,
   craftMethod,
   craftComputed,
@@ -38,15 +39,23 @@ import {
   PRESENTATION_IMAGE_ALLOWED_ORIGINS,
   PRESENTATION_IMAGE_MAX_BYTES,
   PRESENTATION_IMAGE_MIME_TYPES,
+  PRESENTATION_VIDEO_MIME_TYPES,
   PRESENTATION_INTENTIONS,
   PRESENTATION_TRANSITIONS,
+  PRESENTATION_BACKGROUND_TYPES,
+  PRESENTATION_THEMES,
+  PRESENTATION_THEME_GRADIENTS,
+  PRESENTATION_DECORATIONS,
+  PRESENTATION_DECORATION_DEFAULT_COLOR,
   formatPresentationAsMarkdown,
   formatPresentationForYouTube,
+  parsePresentationMarkdown,
   presentationExportFilename,
 } from '../../../shared/presentation';
 import type {
   PresentationDocument,
   PresentationImageMimeType,
+  PresentationMediaMimeType,
   PresentationImageUploadInput,
   PresentationCodeLanguage,
   PresentationIntention,
@@ -56,12 +65,24 @@ import type {
   PresentationStoreInput,
   PresentationTransition,
   PresentationExportFormat,
+  PresentationBackgroundType,
+  PresentationThemeId,
+  PresentationDecoration,
 } from '../../../shared/presentation';
 import { eventValue } from '../../event-value';
 
 const EMPTY_DOCUMENT: PresentationDocument = {
   id: '',
   layout: 'desktop',
+  backgroundType: 'theme',
+  backgroundTheme: 'aurora',
+  backgroundUrl: '',
+  backgroundGradientStart: PRESENTATION_THEME_GRADIENTS.aurora.start,
+  backgroundGradientMiddle: PRESENTATION_THEME_GRADIENTS.aurora.middle,
+  backgroundGradientEnd: PRESENTATION_THEME_GRADIENTS.aurora.end,
+  backgroundGradientAngle: PRESENTATION_THEME_GRADIENTS.aurora.angle,
+  backgroundDecoration: 'orb',
+  backgroundDecorationColor: PRESENTATION_DECORATION_DEFAULT_COLOR,
   title: '',
   audience: '',
   objective: '',
@@ -75,6 +96,7 @@ const EMPTY_DOCUMENT: PresentationDocument = {
 
 type ImageTarget =
   | { readonly kind: 'cover' }
+  | { readonly kind: 'background' }
   | { readonly kind: 'sequence'; readonly sectionId: string; readonly sequenceId: string };
 
 type ImageReadyDetail = { readonly file: File; readonly dataUrl: string };
@@ -84,9 +106,13 @@ type ImageUploadProcessParams = {
   readonly target: ImageTarget;
 };
 
+type PresentationAuthoringMode = 'visual' | 'markdown';
+
 function applyUploadedImage(document: PresentationDocument, target: ImageTarget, imageUrl: string): PresentationDocument {
   return target.kind === 'cover'
     ? { ...document, coverImageUrl: imageUrl }
+    : target.kind === 'background'
+      ? { ...document, backgroundUrl: imageUrl }
     : {
       ...document,
       sections: document.sections.map((section) => section.id === target.sectionId
@@ -107,6 +133,28 @@ function safePresentationImageUrl(url: string): string {
   } catch {
     return '';
   }
+}
+
+function backgroundTypeLabel(value: PresentationBackgroundType): string {
+  if (value === 'image') return i18n.t('ui.editor.backgroundType.image');
+  if (value === 'video') return i18n.t('ui.editor.backgroundType.video');
+  return i18n.t('ui.editor.backgroundType.theme');
+}
+
+function themeLabel(value: PresentationThemeId): string {
+  if (value === 'sunset') return i18n.t('ui.editor.theme.sunset');
+  if (value === 'ocean') return i18n.t('ui.editor.theme.ocean');
+  if (value === 'forest') return i18n.t('ui.editor.theme.forest');
+  if (value === 'paper') return i18n.t('ui.editor.theme.paper');
+  return i18n.t('ui.editor.theme.aurora');
+}
+
+function decorationLabel(value: PresentationDecoration): string {
+  if (value === 'rings') return i18n.t('ui.editor.decoration.rings');
+  if (value === 'particles') return i18n.t('ui.editor.decoration.particles');
+  if (value === 'grid') return i18n.t('ui.editor.decoration.grid');
+  if (value === 'none') return i18n.t('ui.editor.decoration.none');
+  return i18n.t('ui.editor.decoration.orb');
 }
 
 const readPresentationImageFile = craftNodeDirective(
@@ -168,6 +216,15 @@ const downloadPresentationExport = craftNodeDirective(
 function toStoreInput(document: PresentationDocument): PresentationStoreInput {
   return {
     layout: document.layout,
+    backgroundType: document.backgroundType,
+    backgroundTheme: document.backgroundTheme,
+    backgroundUrl: document.backgroundUrl,
+    backgroundGradientStart: document.backgroundGradientStart,
+    backgroundGradientMiddle: document.backgroundGradientMiddle,
+    backgroundGradientEnd: document.backgroundGradientEnd,
+    backgroundGradientAngle: document.backgroundGradientAngle,
+    backgroundDecoration: document.backgroundDecoration,
+    backgroundDecorationColor: document.backgroundDecorationColor,
     title: document.title,
     audience: document.audience,
     objective: document.objective,
@@ -199,6 +256,15 @@ export const EditorPage = craftComponent(
     const exportFormat = yield* state('exportFormat', 'markdown' as PresentationExportFormat, ({ set }) => ({
       setFormat: (value: PresentationExportFormat) => set(value),
     }));
+    const authoringMode = yield* state('authoringMode', 'visual' as PresentationAuthoringMode, ({ set }) => ({
+      setMode: (value: PresentationAuthoringMode) => set(value),
+    }));
+    const markdownSource = yield* state('markdownSource', undefined as string | undefined, ({ set }) => ({
+      replace: (value: string) => set(value),
+    }));
+    const markdownErrors = yield* state('markdownErrors', [] as readonly string[], ({ set }) => ({
+      replace: (value: readonly string[]) => set(value),
+    }));
     const draftChanges = signalSource<PresentationStoreInput>('draftChanges');
     const save = yield* mutation('savePresentation', {
       method: afterRecomputation(draftChanges, (value) => value),
@@ -222,6 +288,13 @@ export const EditorPage = craftComponent(
       method: (input: ImageUploadProcessParams) => input,
       loader: function* ({ params }) {
         const uploaded = yield* uploadPresentationImage(params.presentationId, params.payload);
+        yield* Console.info('Presentation image upload succeeded', {
+          filename: params.payload.filename,
+          mimeType: params.payload.mimeType,
+          dataUrlLength: params.payload.dataUrl.length,
+          target: params.target.kind,
+          url: uploaded.url,
+        });
         const document = (yield* draft()) ?? (yield* presentation.value()) ?? EMPTY_DOCUMENT;
         const nextDocument = applyUploadedImage(document, params.target, uploaded.url);
         yield* draft.replace(nextDocument);
@@ -232,6 +305,24 @@ export const EditorPage = craftComponent(
     });
     const currentDocument = craftComputed('currentDocument', function* () {
       return (yield* draft()) ?? (yield* presentation.value()) ?? EMPTY_DOCUMENT;
+    });
+    const markdownValue = craftComputed('markdownValue', function* () {
+      return (yield* markdownSource()) ?? formatPresentationAsMarkdown(yield* currentDocument());
+    });
+    const isMarkdownMode = craftComputed('isMarkdownMode', function* () {
+      return (yield* authoringMode()) === 'markdown';
+    });
+    const isVisualMode = craftComputed('isVisualMode', function* () {
+      return (yield* authoringMode()) === 'visual';
+    });
+    const hasMarkdownErrors = craftComputed('hasMarkdownErrors', function* () {
+      return (yield* markdownErrors()).length > 0;
+    });
+    const isMarkdownValid = craftComputed('isMarkdownValid', function* () {
+      return !(yield* hasMarkdownErrors());
+    });
+    const markdownErrorMessage = craftComputed('markdownErrorMessage', function* () {
+      return (yield* markdownErrors())[0] ?? '';
     });
     const exportContent = craftComputed('exportContent', function* () {
       const document = yield* currentDocument();
@@ -248,6 +339,21 @@ export const EditorPage = craftComponent(
     });
     const hasCoverImage = craftComputed('hasCoverImage', function* () {
       return Boolean((yield* currentDocument()).coverImageUrl);
+    });
+    const hasBackgroundMedia = craftComputed('hasBackgroundMedia', function* () {
+      return Boolean((yield* currentDocument()).backgroundUrl);
+    });
+    const isThemeBackground = craftComputed('isThemeBackground', function* () {
+      return (yield* currentDocument()).backgroundType === 'theme';
+    });
+    const isMediaBackground = craftComputed('isMediaBackground', function* () {
+      return (yield* currentDocument()).backgroundType !== 'theme';
+    });
+    const isImageBackground = craftComputed('isImageBackground', function* () {
+      return (yield* currentDocument()).backgroundType === 'image';
+    });
+    const isVideoBackground = craftComputed('isVideoBackground', function* () {
+      return (yield* currentDocument()).backgroundType === 'video';
     });
     const coverImageAlt = craftComputed('coverImageAlt', function* () {
       return (yield* currentDocument()).coverImageAlt || i18n.t('ui.editor.coverImageAltFallback');
@@ -294,6 +400,22 @@ export const EditorPage = craftComponent(
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
+    const startMarkdownMode = craftMethod('startMarkdownMode', function* () {
+      yield* markdownSource.replace(formatPresentationAsMarkdown(yield* currentDocument()));
+      yield* markdownErrors.replace([]);
+      yield* authoringMode.setMode('markdown');
+    });
+    const startVisualMode = craftMethod('startVisualMode', function* () {
+      yield* authoringMode.setMode('visual');
+    });
+    const updateMarkdown = craftMethod('updateMarkdown', function* (markdown: string) {
+      const parsed = parsePresentationMarkdown(markdown, yield* currentDocument());
+      yield* markdownSource.replace(markdown);
+      yield* markdownErrors.replace(parsed.errors);
+      if (!parsed.document) return;
+      yield* draft.replace(parsed.document);
+      draftChanges.set(toStoreInput(parsed.document));
+    });
     const updateAudience = craftMethod('updateAudience', function* (audience: string) {
       const document = yield* currentDocument();
       const nextDocument = { ...document, audience };
@@ -315,6 +437,81 @@ export const EditorPage = craftComponent(
     const updateLayout = craftMethod('updateLayout', function* (layout: PresentationLayout) {
       const document = yield* currentDocument();
       const nextDocument = { ...document, layout };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundType = craftMethod('updateBackgroundType', function* (backgroundType: PresentationBackgroundType) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundType };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundTheme = craftMethod('updateBackgroundTheme', function* (backgroundTheme: PresentationThemeId) {
+      const document = yield* currentDocument();
+      const gradient = PRESENTATION_THEME_GRADIENTS[backgroundTheme];
+      const nextDocument = { ...document, backgroundTheme, backgroundGradientStart: gradient.start, backgroundGradientMiddle: gradient.middle, backgroundGradientEnd: gradient.end, backgroundGradientAngle: gradient.angle };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundGradientStart = craftMethod('updateBackgroundGradientStart', function* (backgroundGradientStart: string) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundGradientStart };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundGradientMiddle = craftMethod('updateBackgroundGradientMiddle', function* (backgroundGradientMiddle: string) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundGradientMiddle };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundGradientEnd = craftMethod('updateBackgroundGradientEnd', function* (backgroundGradientEnd: string) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundGradientEnd };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundGradientAngle = craftMethod('updateBackgroundGradientAngle', function* (backgroundGradientAngle: number) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundGradientAngle };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundUrl = craftMethod('updateBackgroundUrl', function* (backgroundUrl: string) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundUrl };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundDecoration = craftMethod('updateBackgroundDecoration', function* (backgroundDecoration: PresentationDecoration) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundDecoration };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const updateBackgroundDecorationColor = craftMethod('updateBackgroundDecorationColor', function* (backgroundDecorationColor: string) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, backgroundDecorationColor };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const clearImage = craftMethod('clearImage', function* (target: ImageTarget) {
+      const document = yield* currentDocument();
+      const nextDocument: PresentationDocument = target.kind === 'cover'
+        ? { ...document, coverImageUrl: '', coverImageAlt: '' }
+        : target.kind === 'background'
+          ? { ...document, backgroundUrl: '' }
+          : {
+            ...document,
+            sections: document.sections.map((section) => section.id === target.sectionId
+              ? {
+                ...section,
+                sequences: section.sequences.map((sequence) => sequence.id === target.sequenceId
+                  ? { ...sequence, imageUrl: '', imageAlt: '' }
+                  : sequence),
+              }
+              : section),
+          };
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
@@ -354,13 +551,35 @@ export const EditorPage = craftComponent(
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
+    const moveSequence = craftMethod('moveSequence', function* (sectionId: string, sequenceId: string, direction: 'up' | 'down') {
+      const document = yield* currentDocument();
+      const sections = document.sections.map((section) => {
+        if (section.id !== sectionId) return section;
+        const fromIndex = section.sequences.findIndex((sequence) => sequence.id === sequenceId);
+        const toIndex = fromIndex + (direction === 'up' ? -1 : 1);
+        if (fromIndex < 0 || toIndex < 0 || toIndex >= section.sequences.length) return section;
+        const sequences = [...section.sequences];
+        const [sequence] = sequences.splice(fromIndex, 1);
+        if (!sequence) return section;
+        sequences.splice(toIndex, 0, sequence);
+        return { ...section, sequences };
+      });
+      if (sections.every((section, index) => section === document.sections[index])) return;
+      const nextDocument: PresentationDocument = { ...document, sections };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
     const handleImageFile = craftMethod('handleImageFile', function* (image: ImageReadyDetail, target: ImageTarget) {
       const { file, dataUrl } = image;
       if (!file) return;
       yield* imageUploadNotice.setNotice('');
       yield* imageUploadError.clear();
-      if (!PRESENTATION_IMAGE_MIME_TYPES.includes(file.type as PresentationImageMimeType)) {
-        yield* imageUploadError.setError(i18n.t('ui.editor.imageUploadTypeError'));
+      const isVideoBackgroundUpload = target.kind === 'background' && (yield* currentDocument()).backgroundType === 'video';
+      const isSupportedUpload = isVideoBackgroundUpload
+        ? PRESENTATION_VIDEO_MIME_TYPES.includes(file.type as (typeof PRESENTATION_VIDEO_MIME_TYPES)[number])
+        : PRESENTATION_IMAGE_MIME_TYPES.includes(file.type as PresentationImageMimeType);
+      if (!isSupportedUpload) {
+        yield* imageUploadError.setError(isVideoBackgroundUpload ? i18n.t('ui.editor.videoUploadTypeError') : i18n.t('ui.editor.imageUploadTypeError'));
         return;
       }
       if (file.size > PRESENTATION_IMAGE_MAX_BYTES) {
@@ -368,11 +587,17 @@ export const EditorPage = craftComponent(
         return;
       }
 
+      yield* Console.info('Presentation image upload started', {
+        filename: file.name,
+        mimeType: file.type,
+        size: file.size,
+        target: target.kind,
+      });
       yield* imageUpload.method({
         presentationId: yield* presentationId(),
         payload: {
           filename: file.name,
-          mimeType: file.type as PresentationImageMimeType,
+          mimeType: file.type as PresentationMediaMimeType,
           dataUrl,
         },
         target,
@@ -447,10 +672,22 @@ export const EditorPage = craftComponent(
       presentation,
       currentDocument,
       exportFormat,
+      authoringMode,
+      markdownValue,
+      isMarkdownMode,
+      isVisualMode,
+      hasMarkdownErrors,
+      isMarkdownValid,
+      markdownErrorMessage,
       exportContent,
       exportFilename,
       hasDocument,
       hasCoverImage,
+      hasBackgroundMedia,
+      isThemeBackground,
+      isMediaBackground,
+      isImageBackground,
+      isVideoBackground,
       coverImageAlt,
       imageUploading,
       imageUploadFailed,
@@ -461,16 +698,30 @@ export const EditorPage = craftComponent(
       isAutosaving,
       autosaveStatus,
       updateTitle,
+      startMarkdownMode,
+      startVisualMode,
+      updateMarkdown,
       updateAudience,
       updateObjective,
       updateCoverImageAlt,
       updateLayout,
+      updateBackgroundType,
+      updateBackgroundTheme,
+      updateBackgroundGradientStart,
+      updateBackgroundGradientMiddle,
+      updateBackgroundGradientEnd,
+      updateBackgroundGradientAngle,
+      updateBackgroundUrl,
+      updateBackgroundDecoration,
+      updateBackgroundDecorationColor,
+      clearImage,
       updateSection,
       updateSequence,
       collapsedSectionIds,
       sectionViews,
       toggleSection,
       moveSection,
+      moveSequence,
       handleImageFile,
       addSection,
       addSequence,
@@ -480,10 +731,14 @@ export const EditorPage = craftComponent(
       presentationId,
     };
   },
-  ({ presentation, currentDocument, hasDocument, exportFormat, exportContent, exportFilename, hasCoverImage, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateSection, updateSequence, sectionViews, toggleSection, moveSection, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
+  ({ presentation, currentDocument, hasDocument, exportFormat, markdownValue, isMarkdownMode, isVisualMode, hasMarkdownErrors, isMarkdownValid, markdownErrorMessage, exportContent, exportFilename, hasCoverImage, hasBackgroundMedia, isThemeBackground, isMediaBackground, isImageBackground, isVideoBackground, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, startMarkdownMode, startVisualMode, updateMarkdown, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateBackgroundType, updateBackgroundTheme, updateBackgroundGradientStart, updateBackgroundGradientMiddle, updateBackgroundGradientEnd, updateBackgroundGradientAngle, updateBackgroundUrl, updateBackgroundDecoration, updateBackgroundDecorationColor, clearImage, updateSection, updateSequence, sectionViews, toggleSection, moveSection, moveSequence, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
     div({ class: 'editor-shell' }, [
       div({ class: 'editor-toolbar' }, [
           a('backToDashboard', { class: 'studio-link', 'aria-label': i18n.t('ui.editor.backToDashboard'), 'data-navigation': 'external', href: '/feature' }, i18n.t('ui.editor.backToDashboard')),
+        ifNode(hasDocument, () => div({ class: 'editor-authoring-toggle', role: 'group', 'aria-label': i18n.t('ui.editor.authoringModeLabel') }, [
+          button('editorVisualMode', { type: 'button', class: 'editor-authoring-toggle__button', 'data-active': function* () { return String(yield* isVisualMode()); }, 'aria-pressed': function* () { return String(yield* isVisualMode()); }, 'aria-label': i18n.t('ui.editor.visualMode'), click: startVisualMode }, i18n.t('ui.editor.visualMode')),
+          button('editorMarkdownMode', { type: 'button', class: 'editor-authoring-toggle__button', 'data-active': function* () { return String(yield* isMarkdownMode()); }, 'aria-pressed': function* () { return String(yield* isMarkdownMode()); }, 'aria-label': i18n.t('ui.editor.markdownMode'), click: startMarkdownMode }, i18n.t('ui.editor.markdownMode')),
+        ])),
         div({ class: 'studio-toolbar' }, [
           ifNode(hasDocument, () => span({ class: 'editor-autosave-status' }, autosaveStatus)),
           ifNode(hasDocument, () => button('savePresentation', { type: 'button', class: 'studio-button', 'aria-label': i18n.t('ui.editor.save'), disabled: isAutosaving, click: saveChanges }, i18n.t('ui.editor.save'))),
@@ -500,12 +755,98 @@ export const EditorPage = craftComponent(
       ifNode(presentation.isLoading, () => p({ class: 'studio-status' }, i18n.t('ui.editor.loading'))),
       ifNode(presentation.hasException, () => p({ class: 'studio-status', 'data-tone': 'danger' }, i18n.t('ui.editor.error'))),
       ifNode(hasDocument, () => [
+      ifNode(isMarkdownMode, () => section({ class: 'editor-markdown-card' }, [
+        div({ class: 'editor-markdown-card__header' }, [
+          div([
+            span({ class: 'studio-panel__label' }, i18n.t('ui.editor.markdownLabel')),
+            heading({ 'aria-label': i18n.t('ui.editor.markdownTitle') }, i18n.t('ui.editor.markdownTitle')),
+          ]),
+          button('editorMarkdownVisualMode', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.visualMode'), click: startVisualMode }, i18n.t('ui.editor.visualMode')),
+        ]),
+        div({ class: 'editor-markdown-card__grid' }, [
+          div({ class: 'editor-markdown-help' }, [
+            p({ class: 'editor-markdown-help__intro' }, i18n.t('ui.editor.markdownDescription')),
+            p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleSlides')),
+            p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleSections')),
+            p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleCode')),
+            p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleNotes')),
+          ]),
+          textarea('presentationMarkdown', { 'aria-label': i18n.t('ui.editor.markdownTitle'), class: 'editor-markdown-input', spellcheck: false, value: markdownValue, *input(event) { yield* updateMarkdown(eventValue(event)); } }),
+        ]),
+        ifNode(hasMarkdownErrors, () => p({ class: 'studio-status', 'data-tone': 'danger' }, markdownErrorMessage)),
+        ifNode(isMarkdownValid, () => p({ class: 'studio-status editor-markdown-valid' }, i18n.t('ui.editor.markdownValid'))),
+      ])),
+      ifNode(isVisualMode, () => [
       section({ class: 'editor-header-card' }, [
         span({ class: 'studio-eyebrow' }, i18n.t('ui.editor.eyebrow')),
         input('presentationTitle', { type: 'text', 'aria-label': i18n.t('ui.editor.titleLabel'), class: 'editor-title-input', value: function* () { return (yield* currentDocument()).title; }, *input(event) { yield* updateTitle(eventValue(event)); } }),
         select('presentationLayout', { 'aria-label': i18n.t('ui.editor.layoutLabel'), class: 'editor-layout-select', value: function* () { return (yield* currentDocument()).layout; }, *change(event) { yield* updateLayout(eventValue(event) as PresentationLayout); } }, [
           option({ value: 'desktop' }, i18n.t('ui.editor.layoutDesktop')),
           option({ value: 'vertical' }, i18n.t('ui.editor.layoutVertical')),
+        ]),
+        div({ class: 'editor-background-settings' }, [
+          div({ class: 'editor-background-settings__header' }, [
+            span({ class: 'studio-panel__label' }, i18n.t('ui.editor.backgroundLabel')),
+            span({ class: 'editor-background-settings__hint' }, i18n.t('ui.editor.backgroundHint')),
+          ]),
+          select('presentationBackgroundType', { 'aria-label': i18n.t('ui.editor.backgroundTypeLabel'), class: 'editor-layout-select', value: function* () { return (yield* currentDocument()).backgroundType; }, *change(event) { yield* updateBackgroundType(eventValue(event) as PresentationBackgroundType); } }, PRESENTATION_BACKGROUND_TYPES.map((backgroundType) => option({ value: backgroundType }, backgroundTypeLabel(backgroundType)))),
+          ifNode(isThemeBackground, () => div({ class: 'editor-theme-picker', role: 'list', 'aria-label': i18n.t('ui.editor.themePickerLabel') }, PRESENTATION_THEMES.map((themeId) => button('presentationTheme', { type: 'button', class: 'editor-theme-option', 'data-theme': themeId, 'data-active': function* () { return String((yield* currentDocument()).backgroundTheme === themeId); }, 'aria-label': themeLabel(themeId), title: themeLabel(themeId), click: function* () { yield* updateBackgroundTheme(themeId); } }, [
+            span({ class: 'editor-theme-option__swatch', 'aria-hidden': true }),
+            span({ class: 'editor-theme-option__name' }, themeLabel(themeId)),
+          ])))),
+          ifNode(isThemeBackground, () => div({ class: 'editor-gradient-editor' }, [
+            div({ class: 'editor-gradient-editor__header' }, [
+              span({ class: 'editor-gradient-editor__title' }, i18n.t('ui.editor.gradientLabel')),
+              span({ class: 'editor-background-settings__hint' }, i18n.t('ui.editor.gradientHint')),
+            ]),
+            div({ class: 'editor-gradient-editor__colors' }, [
+              label({ class: 'editor-gradient-editor__field' }, [
+                span({}, i18n.t('ui.editor.gradientStartLabel')),
+                input('presentationBackgroundGradientStart', { type: 'color', 'aria-label': i18n.t('ui.editor.gradientStartLabel'), value: function* () { return (yield* currentDocument()).backgroundGradientStart; }, *input(event) { yield* updateBackgroundGradientStart(eventValue(event)); } }),
+              ]),
+              label({ class: 'editor-gradient-editor__field' }, [
+                span({}, i18n.t('ui.editor.gradientMiddleLabel')),
+                input('presentationBackgroundGradientMiddle', { type: 'color', 'aria-label': i18n.t('ui.editor.gradientMiddleLabel'), value: function* () { return (yield* currentDocument()).backgroundGradientMiddle; }, *input(event) { yield* updateBackgroundGradientMiddle(eventValue(event)); } }),
+              ]),
+              label({ class: 'editor-gradient-editor__field' }, [
+                span({}, i18n.t('ui.editor.gradientEndLabel')),
+                input('presentationBackgroundGradientEnd', { type: 'color', 'aria-label': i18n.t('ui.editor.gradientEndLabel'), value: function* () { return (yield* currentDocument()).backgroundGradientEnd; }, *input(event) { yield* updateBackgroundGradientEnd(eventValue(event)); } }),
+              ]),
+              label({ class: 'editor-gradient-editor__field editor-gradient-editor__angle' }, [
+                span({ class: 'editor-gradient-editor__angle-label' }, [
+                  span({}, i18n.t('ui.editor.gradientAngleLabel')),
+                  span({}, function* () { return `${(yield* currentDocument()).backgroundGradientAngle}°`; }),
+                ]),
+                input('presentationBackgroundGradientAngle', { type: 'range', min: '0', max: '360', step: '1', 'aria-label': i18n.t('ui.editor.gradientAngleLabel'), value: function* () { return String((yield* currentDocument()).backgroundGradientAngle); }, *input(event) { yield* updateBackgroundGradientAngle(Number(eventValue(event))); } }),
+              ]),
+            ]),
+          ])),
+          ifNode(isMediaBackground, () => [
+            ifNode(isImageBackground, () => label({ class: 'editor-image-dropzone editor-background-upload', 'aria-label': i18n.t('ui.editor.backgroundImageDropzone'), onImageReady: function* (event: Event) { yield* handleImageFile((event as CustomEvent<ImageReadyDetail>).detail, { kind: 'background' }); } }, [
+              span({ class: 'editor-image-dropzone__title' }, i18n.t('ui.editor.backgroundImageDropzoneTitle')),
+              span({ class: 'editor-image-dropzone__hint' }, i18n.t('ui.editor.imageDropzoneHint')),
+              input('presentationBackgroundImageFile', { type: 'file', accept: PRESENTATION_IMAGE_MIME_TYPES.join(','), class: 'editor-image-file-input', 'aria-label': i18n.t('ui.editor.backgroundImageDropzone') }),
+            ]).pipe(readPresentationImageFile)),
+            ifNode(isVideoBackground, () => label({ class: 'editor-image-dropzone editor-background-upload', 'aria-label': i18n.t('ui.editor.backgroundVideoDropzone'), onImageReady: function* (event: Event) { yield* handleImageFile((event as CustomEvent<ImageReadyDetail>).detail, { kind: 'background' }); } }, [
+              span({ class: 'editor-image-dropzone__title' }, i18n.t('ui.editor.backgroundVideoDropzoneTitle')),
+              span({ class: 'editor-image-dropzone__hint' }, i18n.t('ui.editor.videoDropzoneHint')),
+              input('presentationBackgroundVideoFile', { type: 'file', accept: PRESENTATION_VIDEO_MIME_TYPES.join(','), class: 'editor-image-file-input', 'aria-label': i18n.t('ui.editor.backgroundVideoDropzone') }),
+            ]).pipe(readPresentationImageFile)),
+            input('presentationBackgroundUrl', { type: 'url', 'aria-label': i18n.t('ui.editor.backgroundUrlLabel'), class: 'editor-background-url', placeholder: i18n.t('ui.editor.backgroundUrlPlaceholder'), value: function* () { return (yield* currentDocument()).backgroundUrl; }, *input(event) { yield* updateBackgroundUrl(eventValue(event)); } }),
+            ifNode(hasBackgroundMedia, () => button('removeBackgroundMedia', { type: 'button', class: 'studio-button studio-button--subtle editor-media-remove', 'aria-label': i18n.t('ui.editor.removeBackgroundMedia'), click: function* () { yield* clearImage({ kind: 'background' }); } }, i18n.t('ui.editor.removeBackgroundMedia'))),
+            p({ class: 'editor-background-settings__hint' }, i18n.t('ui.editor.backgroundMediaHint')),
+          ]),
+          div({ class: 'editor-background-decoration' }, [
+            label({ class: 'editor-background-decoration__field' }, [
+              span({ class: 'editor-background-decoration__label' }, i18n.t('ui.editor.backgroundDecorationLabel')),
+              select('presentationBackgroundDecoration', { 'aria-label': i18n.t('ui.editor.backgroundDecorationLabel'), value: function* () { return (yield* currentDocument()).backgroundDecoration; }, *change(event) { yield* updateBackgroundDecoration(eventValue(event) as PresentationDecoration); } }, PRESENTATION_DECORATIONS.map((decoration) => option({ value: decoration }, decorationLabel(decoration)))),
+            ]),
+            label({ class: 'editor-background-decoration__field editor-background-decoration__color' }, [
+              span({ class: 'editor-background-decoration__label' }, i18n.t('ui.editor.backgroundDecorationColorLabel')),
+              input('presentationBackgroundDecorationColor', { type: 'color', 'aria-label': i18n.t('ui.editor.backgroundDecorationColorLabel'), value: function* () { return (yield* currentDocument()).backgroundDecorationColor; }, *input(event) { yield* updateBackgroundDecorationColor(eventValue(event)); } }),
+            ]),
+          ]),
+          p({ class: 'editor-background-settings__hint' }, i18n.t('ui.editor.backgroundDecorationHint')),
         ]),
         input('presentationAudience', { type: 'text', 'aria-label': i18n.t('ui.editor.audiencePlaceholder'), class: 'editor-audience-input', placeholder: i18n.t('ui.editor.audiencePlaceholder'), value: function* () { return (yield* currentDocument()).audience; }, *input(event) { yield* updateAudience(eventValue(event)); } }),
         textarea('presentationObjective', { 'aria-label': i18n.t('ui.editor.objectivePlaceholder'), class: 'editor-objective-input', placeholder: i18n.t('ui.editor.objectivePlaceholder'), value: function* () { return (yield* currentDocument()).objective; }, *input(event) { yield* updateObjective(eventValue(event)); } }),
@@ -515,8 +856,11 @@ export const EditorPage = craftComponent(
           span({ class: 'editor-image-dropzone__hint' }, i18n.t('ui.editor.imageDropzoneHint')),
           input('presentationCoverImageFile', { type: 'file', accept: PRESENTATION_IMAGE_MIME_TYPES.join(','), class: 'editor-image-file-input', 'aria-label': i18n.t('ui.editor.coverImageDropzone') }),
         ]).pipe(readPresentationImageFile),
-        // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationImageUrl validates and drops blocked origins.
-        ifNode(hasCoverImage, () => img({ class: 'editor-cover-image-preview', src: function* () { return safePresentationImageUrl((yield* currentDocument()).coverImageUrl); }, alt: coverImageAlt })),
+        ifNode(hasCoverImage, () => div({ class: 'editor-media-preview' }, [
+          // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationImageUrl validates and drops blocked origins.
+          img({ class: 'editor-cover-image-preview', src: function* () { return safePresentationImageUrl((yield* currentDocument()).coverImageUrl); }, alt: coverImageAlt }),
+          button('removeCoverImage', { type: 'button', class: 'studio-button studio-button--subtle editor-media-remove', 'aria-label': i18n.t('ui.editor.removeImage'), click: function* () { yield* clearImage({ kind: 'cover' }); } }, i18n.t('ui.editor.removeImage')),
+        ])),
         ifNode(imageUploading, () => p({ class: 'studio-status' }, i18n.t('ui.editor.imageUploading'))),
         ifNode(imageUploadFailed, () => p({ class: 'studio-status', 'data-tone': 'danger' }, imageUploadErrorMessage)),
         ifNode(hasImageUploadNotice, () => p({ class: 'studio-status' }, imageUploadNotice)),
@@ -555,9 +899,14 @@ export const EditorPage = craftComponent(
                 input('sequenceImageFile', { type: 'file', accept: PRESENTATION_IMAGE_MIME_TYPES.join(','), class: 'editor-image-file-input', 'aria-label': i18n.t('ui.editor.sequenceImageDropzone') }),
               ]).pipe(readPresentationImageFile),
               input('sequenceImageAlt', { type: 'text', 'aria-label': i18n.t('ui.editor.imageAltLabel'), class: 'editor-image-input', placeholder: i18n.t('ui.editor.imageAltPlaceholder'), value: function* () { return (yield* sequenceInput()).imageAlt; }, *input(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { imageAlt: eventValue(event) }); } }),
-              // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
-              img({ class: 'editor-sequence-image', src: function* () { return safePresentationImageUrl((yield* sequenceInput()).imageUrl); }, alt: function* () { return (yield* sequenceInput()).imageAlt; } }),
+              div({ class: 'editor-media-preview', 'data-has-image': function* () { return String(Boolean((yield* sequenceInput()).imageUrl)); } }, [
+                // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
+                img({ class: 'editor-sequence-image', src: function* () { return safePresentationImageUrl((yield* sequenceInput()).imageUrl); }, alt: function* () { return (yield* sequenceInput()).imageAlt; } }),
+                button('removeSequenceImage', { type: 'button', class: 'studio-button studio-button--subtle editor-media-remove', 'aria-label': i18n.t('ui.editor.removeImage'), click: function* () { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* clearImage({ kind: 'sequence', sectionId: section.id, sequenceId: sequence.id }); } }, i18n.t('ui.editor.removeImage')),
+              ]),
               div({ class: 'editor-sequence-footer' }, [
+                button('moveSequenceUp', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.moveSequenceUp'), disabled: function* () { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); return section.sequences.findIndex((item) => item.id === sequence.id) <= 0; }, click: function* () { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* moveSequence(section.id, sequence.id, 'up'); } }, '↑'),
+                button('moveSequenceDown', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.moveSequenceDown'), disabled: function* () { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); return section.sequences.findIndex((item) => item.id === sequence.id) >= section.sequences.length - 1; }, click: function* () { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* moveSequence(section.id, sequence.id, 'down'); } }, '↓'),
                 input('sequenceDuration', { type: 'number', 'aria-label': i18n.t('ui.editor.durationLabel'), min: '1', class: 'editor-duration-input', value: function* () { return String((yield* sequenceInput()).durationMinutes); }, *input(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { durationMinutes: Number(eventValue(event)) || 1 }); } }),
                 select('sequenceTransition', { 'aria-label': i18n.t('ui.editor.transitionLabel'), class: 'editor-transition-select', value: function* () { return (yield* sequenceInput()).transition; }, *change(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { transition: eventValue(event) as PresentationTransition }); } }, PRESENTATION_TRANSITIONS.map((transition) => option({ value: transition }, transition))),
                 button('deleteSequence', { type: 'button', class: 'studio-button studio-button--danger', 'aria-label': i18n.t('ui.editor.deleteSequence'), click: function* () { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* deleteSequence(section.id, sequence.id); } }, i18n.t('ui.editor.deleteSequence')),
@@ -567,6 +916,7 @@ export const EditorPage = craftComponent(
             button('addSequence', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.addSequence'), click: function* () { yield* addSequence((yield* sectionViewInput()).section.id); } }, i18n.t('ui.editor.addSequence')),
           ]),
         ),
+      ]),
       ]),
       ], () => section({ class: 'editor-loading-card', 'aria-label': i18n.t('ui.editor.loading') }, [
         div({ class: 'editor-loading-card__bar' }),

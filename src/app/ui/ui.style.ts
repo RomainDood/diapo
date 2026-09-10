@@ -114,3 +114,10 @@ export const presentationProgressVars = cssVars('presentationProgress', {
 export const presentationSlideVars = cssVars('presentationSlide', {
   phase: kind.number(num(0)),
 });
+
+export const presentationGradientVars = cssVars('presentationGradient', {
+  start: kind.color(ui.surface.page, themed),
+  middle: kind.color(ui.surface.raised, themed),
+  end: kind.color(ui.accent.info, themed),
+  angle: kind.angle(unit.deg(135), themed),
+});

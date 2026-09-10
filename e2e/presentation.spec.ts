@@ -119,12 +119,16 @@ test('creates a subject, saves speaker notes, and reloads them', async ({ page }
   await expect(page.getByLabel('Part title').nth(1)).toHaveValue(firstSectionTitle);
   await expect(page.getByLabel('Sequence title')).toHaveCount(2);
   await expect(page.locator('.editor-cover-image-preview')).toBeVisible();
+  await expect(page.locator('.editor-cover-image-preview')).toHaveAttribute('src', /^\/api\/presentation-images\/[^/]+\.png$/);
+  await expect.poll(() => page.locator('.editor-cover-image-preview').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByLabel('Private speaker notes: examples, transitions, reminders…').first()).toHaveValue(`${notes} Autosave check.`);
   await expect(page.getByLabel('Visible message').first()).toHaveValue(multilineMessage);
   await expect(page.getByLabel('Part intention').nth(1)).toHaveValue('Comparer');
   await expect(page.getByLabel('Code').first()).toHaveValue('const answer = 42;');
   await expect(page.getByLabel('Code language').first()).toHaveValue('javascript');
   await expect(page.locator('.editor-sequence-image').first()).toBeVisible();
+  await expect(page.locator('.editor-sequence-image').first()).toHaveAttribute('src', /^\/api\/presentation-images\/[^/]+\.png$/);
+  await expect.poll(() => page.locator('.editor-sequence-image').first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByLabel('Transition', { exact: true }).first()).toHaveValue('Zoom');
   const layout = page.getByLabel('Presentation format');
   await expect(layout).toHaveValue('desktop');
@@ -296,4 +300,52 @@ test('opens a speaker note link inside the presentation and returns to the same 
   await page.getByRole('button', { name: 'Back to presentation' }).click();
   await expect(page.locator('.presentation-link-viewer')).toHaveCount(0);
   await expect(page.getByText('1 / 2')).toBeVisible();
+});
+
+test('writes a presentation directly in Markdown', async ({ page }) => {
+  await page.goto('/editor/presentation-demo');
+  await page.getByRole('button', { name: 'Markdown', exact: true }).click();
+
+  const markdown = [
+    '# Une présentation écrite en Markdown',
+    '',
+    '**Audience :** Équipe produit',
+    '**Objective :** Décider plus vite',
+    '',
+    '## Part 1 — Le contexte',
+    '',
+    '*Intention :* Expliquer',
+    '',
+    '### Sequence 1 — Une idée par diapositive',
+    '',
+    '- Une idée forte',
+    '- Un exemple concret',
+    '',
+    '**Duration :** 4 min',
+    '**Transition :** Zoom',
+    '',
+    '#### Notes',
+    '',
+    '> Commencer par une situation vécue.',
+    '',
+    '#### Code',
+    '',
+    '```typescript',
+    'const slide = "Markdown";',
+    '```',
+  ].join('\n');
+  const saveResponse = page.waitForResponse(
+    (response) => response.url().endsWith('/api/presentations/presentation-demo') && response.request().method() === 'PUT' && response.ok(),
+  );
+  await page.locator('textarea[aria-label="Write the presentation in Markdown"]').fill(markdown);
+  await saveResponse;
+  await expect(page.getByText('Markdown is valid and applied to the presentation.')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Authoring mode' }).getByRole('button', { name: 'Visual editor', exact: true })).toBeVisible();
+
+  await page.getByRole('group', { name: 'Authoring mode' }).getByRole('button', { name: 'Visual editor', exact: true }).click();
+  await expect(page.getByLabel('Presentation title')).toHaveValue('Une présentation écrite en Markdown');
+  await expect(page.getByLabel('Part title')).toHaveValue('Le contexte');
+  await expect(page.getByLabel('Sequence title')).toHaveValue('Une idée par diapositive');
+  await expect(page.getByLabel('Code', { exact: true })).toHaveValue('const slide = "Markdown";');
+  await expect(page.getByLabel('Private speaker notes: examples, transitions, reminders…')).toHaveValue('Commencer par une situation vécue.');
 });

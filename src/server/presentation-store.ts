@@ -14,6 +14,14 @@ import {
   type PresentationStoreInput,
   type PresentationSummary,
   PRESENTATION_TRANSITIONS,
+  PRESENTATION_BACKGROUND_TYPES,
+  PRESENTATION_THEMES,
+  PRESENTATION_THEME_GRADIENTS,
+  PRESENTATION_DECORATIONS,
+  PRESENTATION_DECORATION_DEFAULT_COLOR,
+  type PresentationBackgroundType,
+  type PresentationThemeId,
+  type PresentationDecoration,
   type PresentationCodeLanguage,
   type PresentationIntention,
   type PresentationTransition,
@@ -38,6 +46,15 @@ export class PresentationStore extends Context.Service<PresentationStore, Presen
 type PresentationRow = {
   id: string;
   layout: string;
+  background_type: string;
+  background_theme: string;
+  background_url: string;
+  background_gradient_start: string;
+  background_gradient_middle: string;
+  background_gradient_end: string;
+  background_gradient_angle: number;
+  background_decoration: string;
+  background_decoration_color: string;
   title: string;
   audience: string;
   objective: string;
@@ -114,6 +131,36 @@ function presentationLayout(value: string): PresentationStoreInput['layout'] {
     : 'desktop';
 }
 
+function presentationBackgroundType(value: string): PresentationBackgroundType {
+  return PRESENTATION_BACKGROUND_TYPES.includes(value as PresentationBackgroundType)
+    ? value as PresentationBackgroundType
+    : 'theme';
+}
+
+function presentationTheme(value: string): PresentationThemeId {
+  return PRESENTATION_THEMES.includes(value as PresentationThemeId)
+    ? value as PresentationThemeId
+    : 'aurora';
+}
+
+function presentationGradientColor(value: string, fallback: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
+function presentationGradientAngle(value: number): number {
+  return Number.isFinite(value) ? Math.min(Math.max(Math.round(value), 0), 360) : 135;
+}
+
+function presentationDecoration(value: string): PresentationDecoration {
+  return PRESENTATION_DECORATIONS.includes(value as PresentationDecoration)
+    ? value as PresentationDecoration
+    : 'orb';
+}
+
+function presentationDecorationColor(value: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : PRESENTATION_DECORATION_DEFAULT_COLOR;
+}
+
 function groupSections(rows: readonly SectionRow[]): readonly PresentationSection[] {
   const sections = new Map<string, PresentationSection>();
   for (const row of rows) {
@@ -157,6 +204,15 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       audience TEXT NOT NULL,
       objective TEXT NOT NULL,
       layout TEXT NOT NULL DEFAULT 'desktop',
+      background_type TEXT NOT NULL DEFAULT 'theme',
+      background_theme TEXT NOT NULL DEFAULT 'aurora',
+      background_url TEXT NOT NULL DEFAULT '',
+      background_gradient_start TEXT NOT NULL DEFAULT '#211047',
+      background_gradient_middle TEXT NOT NULL DEFAULT '#3c176b',
+      background_gradient_end TEXT NOT NULL DEFAULT '#8514f5',
+      background_gradient_angle INTEGER NOT NULL DEFAULT 135,
+      background_decoration TEXT NOT NULL DEFAULT 'orb',
+      background_decoration_color TEXT NOT NULL DEFAULT '${PRESENTATION_DECORATION_DEFAULT_COLOR}',
       cover_image_url TEXT NOT NULL DEFAULT '',
       cover_image_alt TEXT NOT NULL DEFAULT '',
       duration_minutes INTEGER NOT NULL DEFAULT 0,
@@ -184,9 +240,26 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
 
   const presentationColumns = database.prepare('PRAGMA table_info(presentations)').all() as readonly { name: string }[];
   const presentationColumnNames = new Set(presentationColumns.map((column) => column.name));
+  const hadAllGradientColumns = ['background_gradient_start', 'background_gradient_middle', 'background_gradient_end', 'background_gradient_angle'].every((name) => presentationColumnNames.has(name));
   if (!presentationColumnNames.has('layout')) database.exec("ALTER TABLE presentations ADD COLUMN layout TEXT NOT NULL DEFAULT 'desktop'");
   if (!presentationColumnNames.has('cover_image_url')) database.exec("ALTER TABLE presentations ADD COLUMN cover_image_url TEXT NOT NULL DEFAULT ''");
   if (!presentationColumnNames.has('cover_image_alt')) database.exec("ALTER TABLE presentations ADD COLUMN cover_image_alt TEXT NOT NULL DEFAULT ''");
+  if (!presentationColumnNames.has('background_type')) database.exec("ALTER TABLE presentations ADD COLUMN background_type TEXT NOT NULL DEFAULT 'theme'");
+  if (!presentationColumnNames.has('background_theme')) database.exec("ALTER TABLE presentations ADD COLUMN background_theme TEXT NOT NULL DEFAULT 'aurora'");
+  if (!presentationColumnNames.has('background_url')) database.exec("ALTER TABLE presentations ADD COLUMN background_url TEXT NOT NULL DEFAULT ''");
+  if (!presentationColumnNames.has('background_gradient_start')) database.exec("ALTER TABLE presentations ADD COLUMN background_gradient_start TEXT NOT NULL DEFAULT '#211047'");
+  if (!presentationColumnNames.has('background_gradient_middle')) database.exec("ALTER TABLE presentations ADD COLUMN background_gradient_middle TEXT NOT NULL DEFAULT '#3c176b'");
+  if (!presentationColumnNames.has('background_gradient_end')) database.exec("ALTER TABLE presentations ADD COLUMN background_gradient_end TEXT NOT NULL DEFAULT '#8514f5'");
+  if (!presentationColumnNames.has('background_gradient_angle')) database.exec("ALTER TABLE presentations ADD COLUMN background_gradient_angle INTEGER NOT NULL DEFAULT 135");
+  if (!hadAllGradientColumns) database.exec(`
+    UPDATE presentations SET
+      background_gradient_start = CASE background_theme WHEN 'sunset' THEN '${PRESENTATION_THEME_GRADIENTS.sunset.start}' WHEN 'ocean' THEN '${PRESENTATION_THEME_GRADIENTS.ocean.start}' WHEN 'forest' THEN '${PRESENTATION_THEME_GRADIENTS.forest.start}' WHEN 'paper' THEN '${PRESENTATION_THEME_GRADIENTS.paper.start}' ELSE '${PRESENTATION_THEME_GRADIENTS.aurora.start}' END,
+      background_gradient_middle = CASE background_theme WHEN 'sunset' THEN '${PRESENTATION_THEME_GRADIENTS.sunset.middle}' WHEN 'ocean' THEN '${PRESENTATION_THEME_GRADIENTS.ocean.middle}' WHEN 'forest' THEN '${PRESENTATION_THEME_GRADIENTS.forest.middle}' WHEN 'paper' THEN '${PRESENTATION_THEME_GRADIENTS.paper.middle}' ELSE '${PRESENTATION_THEME_GRADIENTS.aurora.middle}' END,
+      background_gradient_end = CASE background_theme WHEN 'sunset' THEN '${PRESENTATION_THEME_GRADIENTS.sunset.end}' WHEN 'ocean' THEN '${PRESENTATION_THEME_GRADIENTS.ocean.end}' WHEN 'forest' THEN '${PRESENTATION_THEME_GRADIENTS.forest.end}' WHEN 'paper' THEN '${PRESENTATION_THEME_GRADIENTS.paper.end}' ELSE '${PRESENTATION_THEME_GRADIENTS.aurora.end}' END,
+      background_gradient_angle = 135
+  `);
+  if (!presentationColumnNames.has('background_decoration')) database.exec("ALTER TABLE presentations ADD COLUMN background_decoration TEXT NOT NULL DEFAULT 'orb'");
+  if (!presentationColumnNames.has('background_decoration_color')) database.exec(`ALTER TABLE presentations ADD COLUMN background_decoration_color TEXT NOT NULL DEFAULT '${PRESENTATION_DECORATION_DEFAULT_COLOR}'`);
 
   const sequenceColumns = database.prepare('PRAGMA table_info(sequences)').all() as readonly { name: string }[];
   const sequenceColumnNames = new Set(sequenceColumns.map((column) => column.name));
@@ -200,8 +273,8 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
   );
 
   const insertPresentation = database.prepare(
-    `INSERT INTO presentations (id, title, audience, objective, layout, cover_image_url, cover_image_alt, duration_minutes, created_at, updated_at)
-     VALUES (@id, @title, @audience, @objective, @layout, @coverImageUrl, @coverImageAlt, @durationMinutes, @createdAt, @updatedAt)`,
+    `INSERT INTO presentations (id, title, audience, objective, layout, background_type, background_theme, background_url, background_gradient_start, background_gradient_middle, background_gradient_end, background_gradient_angle, background_decoration, background_decoration_color, cover_image_url, cover_image_alt, duration_minutes, created_at, updated_at)
+     VALUES (@id, @title, @audience, @objective, @layout, @backgroundType, @backgroundTheme, @backgroundUrl, @backgroundGradientStart, @backgroundGradientMiddle, @backgroundGradientEnd, @backgroundGradientAngle, @backgroundDecoration, @backgroundDecorationColor, @coverImageUrl, @coverImageAlt, @durationMinutes, @createdAt, @updatedAt)`,
   );
   const insertSection = database.prepare(
     `INSERT INTO sections (id, presentation_id, position, title, intention)
@@ -216,9 +289,9 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
     database.prepare('DELETE FROM sections WHERE presentation_id = ?').run(id);
     database.prepare(
       `UPDATE presentations
-       SET title = ?, audience = ?, objective = ?, layout = ?, cover_image_url = ?, cover_image_alt = ?, duration_minutes = ?, updated_at = ?
+       SET title = ?, audience = ?, objective = ?, layout = ?, background_type = ?, background_theme = ?, background_url = ?, background_gradient_start = ?, background_gradient_middle = ?, background_gradient_end = ?, background_gradient_angle = ?, background_decoration = ?, background_decoration_color = ?, cover_image_url = ?, cover_image_alt = ?, duration_minutes = ?, updated_at = ?
        WHERE id = ?`,
-    ).run(input.title, input.audience, input.objective, input.layout, input.coverImageUrl, input.coverImageAlt, durationOf(input.sections), timestamps.updatedAt, id);
+    ).run(input.title, input.audience, input.objective, input.layout, input.backgroundType, input.backgroundTheme, input.backgroundUrl, input.backgroundGradientStart, input.backgroundGradientMiddle, input.backgroundGradientEnd, input.backgroundGradientAngle, input.backgroundDecoration, input.backgroundDecorationColor, input.coverImageUrl, input.coverImageAlt, durationOf(input.sections), timestamps.updatedAt, id);
     input.sections.forEach((section, sectionIndex) => {
       insertSection.run({
         id: section.id,
@@ -265,6 +338,15 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       audience: presentation.audience,
       objective: presentation.objective,
       layout: presentationLayout(presentation.layout),
+      backgroundType: presentationBackgroundType(presentation.background_type),
+      backgroundTheme: presentationTheme(presentation.background_theme),
+      backgroundUrl: presentation.background_url ?? '',
+      backgroundGradientStart: presentationGradientColor(presentation.background_gradient_start, PRESENTATION_THEME_GRADIENTS[presentationTheme(presentation.background_theme)].start),
+      backgroundGradientMiddle: presentationGradientColor(presentation.background_gradient_middle, PRESENTATION_THEME_GRADIENTS[presentationTheme(presentation.background_theme)].middle),
+      backgroundGradientEnd: presentationGradientColor(presentation.background_gradient_end, PRESENTATION_THEME_GRADIENTS[presentationTheme(presentation.background_theme)].end),
+      backgroundGradientAngle: presentationGradientAngle(presentation.background_gradient_angle),
+      backgroundDecoration: presentationDecoration(presentation.background_decoration),
+      backgroundDecorationColor: presentationDecorationColor(presentation.background_decoration_color),
       coverImageUrl: presentation.cover_image_url ?? '',
       coverImageAlt: presentation.cover_image_alt ?? '',
       durationMinutes: presentation.duration_minutes,
@@ -284,6 +366,15 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       audience: DEFAULT_PRESENTATION.audience,
       objective: DEFAULT_PRESENTATION.objective,
       layout: DEFAULT_PRESENTATION.layout,
+      backgroundType: DEFAULT_PRESENTATION.backgroundType,
+      backgroundTheme: DEFAULT_PRESENTATION.backgroundTheme,
+      backgroundUrl: DEFAULT_PRESENTATION.backgroundUrl,
+      backgroundGradientStart: DEFAULT_PRESENTATION.backgroundGradientStart,
+      backgroundGradientMiddle: DEFAULT_PRESENTATION.backgroundGradientMiddle,
+      backgroundGradientEnd: DEFAULT_PRESENTATION.backgroundGradientEnd,
+      backgroundGradientAngle: DEFAULT_PRESENTATION.backgroundGradientAngle,
+      backgroundDecoration: DEFAULT_PRESENTATION.backgroundDecoration,
+      backgroundDecorationColor: DEFAULT_PRESENTATION.backgroundDecorationColor,
       coverImageUrl: DEFAULT_PRESENTATION.coverImageUrl,
       coverImageAlt: DEFAULT_PRESENTATION.coverImageAlt,
       durationMinutes: durationOf(DEFAULT_PRESENTATION.sections),
@@ -336,7 +427,16 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       const now = new Date().toISOString();
       const initial: PresentationStoreInput = {
         ...input,
-        layout: 'desktop',
+      layout: 'desktop',
+        backgroundType: 'theme',
+        backgroundTheme: 'aurora',
+        backgroundUrl: '',
+        backgroundGradientStart: PRESENTATION_THEME_GRADIENTS.aurora.start,
+        backgroundGradientMiddle: PRESENTATION_THEME_GRADIENTS.aurora.middle,
+        backgroundGradientEnd: PRESENTATION_THEME_GRADIENTS.aurora.end,
+        backgroundGradientAngle: PRESENTATION_THEME_GRADIENTS.aurora.angle,
+        backgroundDecoration: 'orb',
+        backgroundDecorationColor: PRESENTATION_DECORATION_DEFAULT_COLOR,
         coverImageUrl: '',
         coverImageAlt: '',
         sections: [{
@@ -357,7 +457,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
           }],
         }],
       };
-      insertPresentation.run({ id, title: initial.title, audience: initial.audience, objective: initial.objective, layout: initial.layout, coverImageUrl: initial.coverImageUrl, coverImageAlt: initial.coverImageAlt, durationMinutes: durationOf(initial.sections), createdAt: now, updatedAt: now });
+      insertPresentation.run({ id, title: initial.title, audience: initial.audience, objective: initial.objective, layout: initial.layout, backgroundType: initial.backgroundType, backgroundTheme: initial.backgroundTheme, backgroundUrl: initial.backgroundUrl, backgroundGradientStart: initial.backgroundGradientStart, backgroundGradientMiddle: initial.backgroundGradientMiddle, backgroundGradientEnd: initial.backgroundGradientEnd, backgroundGradientAngle: initial.backgroundGradientAngle, backgroundDecoration: initial.backgroundDecoration, backgroundDecorationColor: initial.backgroundDecorationColor, coverImageUrl: initial.coverImageUrl, coverImageAlt: initial.coverImageAlt, durationMinutes: durationOf(initial.sections), createdAt: now, updatedAt: now });
       writeDocument(id, initial, { createdAt: now, updatedAt: now });
       return read(id);
     }),

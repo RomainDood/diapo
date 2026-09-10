@@ -1,6 +1,26 @@
 import * as THREE from 'three';
 import { craftNodeDirective } from '@craft-ts/core';
 
+const DEFAULT_DECORATION = 'orb';
+const DEFAULT_COLOR = '#f736e3';
+
+function decorationColor(value: string | undefined): THREE.Color {
+  return /^#[0-9a-f]{6}$/i.test(value ?? '') ? new THREE.Color(value ?? DEFAULT_COLOR) : new THREE.Color(DEFAULT_COLOR);
+}
+
+function disposeMaterial(material: THREE.Material | readonly THREE.Material[]): void {
+  if (Array.isArray(material)) material.forEach((item) => item.dispose());
+  else (material as THREE.Material).dispose();
+}
+
+function disposeObject(object: THREE.Object3D): void {
+  object.traverse((child) => {
+    const renderable = child as THREE.Mesh;
+    if (renderable.geometry instanceof THREE.BufferGeometry) renderable.geometry.dispose();
+    if (renderable.material instanceof THREE.Material || Array.isArray(renderable.material)) disposeMaterial(renderable.material);
+  });
+}
+
 /**
  * Adds a lightweight Three.js ambient scene behind the semantic presentation
  * cards. The cards themselves stay native CraftTS buttons so they remain
@@ -26,19 +46,53 @@ export const threePresentationBackdrop = craftNodeDirective(
     const group = new THREE.Group();
     scene.add(group);
 
-    const orb = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(1.7, 2),
-      new THREE.MeshBasicMaterial({ color: 0x8514f5, transparent: true, opacity: 0.24, wireframe: true }),
-    );
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(2.35, 0.018, 12, 120),
-      new THREE.MeshBasicMaterial({ color: 0xf736e3, transparent: true, opacity: 0.42 }),
-    );
-    const halo = new THREE.Mesh(
-      new THREE.SphereGeometry(1.15, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0x5c44e4, transparent: true, opacity: 0.09 }),
-    );
-    group.add(orb, ring, halo);
+    const shell = canvas.closest<HTMLElement>('.presentation-shell');
+    let activeDecoration = DEFAULT_DECORATION;
+    let structures: THREE.Object3D[] = [];
+    const clearStructures = () => {
+      structures.forEach((structure) => {
+        group.remove(structure);
+        disposeObject(structure);
+      });
+      structures = [];
+    };
+    const buildStructures = () => {
+      clearStructures();
+      activeDecoration = shell?.dataset.decoration ?? DEFAULT_DECORATION;
+      const color = decorationColor(shell?.dataset.decorationColor);
+      if (activeDecoration === 'rings') {
+        structures = [0, 1, 2].map((index) => {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(1.35 + index * 0.55, 0.018, 12, 120), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5 - index * 0.1 }));
+          ring.rotation.x = index * 0.7;
+          ring.rotation.y = index * 0.35;
+          return ring;
+        });
+      } else if (activeDecoration === 'particles') {
+        const positions = new Float32Array(96 * 3);
+        for (let index = 0; index < 96; index += 1) {
+          const angle = index * 2.39996;
+          const radius = 0.35 + (index % 12) * 0.14;
+          positions[index * 3] = Math.cos(angle) * radius;
+          positions[index * 3 + 1] = ((index % 16) - 7.5) * 0.18;
+          positions[index * 3 + 2] = Math.sin(angle) * radius;
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        structures = [new THREE.Points(geometry, new THREE.PointsMaterial({ color, size: 0.045, transparent: true, opacity: 0.78 }))];
+      } else if (activeDecoration === 'grid') {
+        const grid = new THREE.Mesh(new THREE.PlaneGeometry(7, 7, 20, 20), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.26, wireframe: true, side: THREE.DoubleSide }));
+        grid.rotation.x = Math.PI / 2;
+        grid.position.z = -0.4;
+        structures = [grid];
+      } else if (activeDecoration === 'orb') {
+        const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(1.7, 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, wireframe: true }));
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.018, 12, 120), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52 }));
+        const halo = new THREE.Mesh(new THREE.SphereGeometry(1.15, 32, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.1 }));
+        structures = [orb, ring, halo];
+      }
+      group.add(...structures);
+    };
+    buildStructures();
 
     const resize = () => {
       const bounds = canvas.getBoundingClientRect();
@@ -50,27 +104,35 @@ export const threePresentationBackdrop = craftNodeDirective(
       camera.updateProjectionMatrix();
     };
     resize();
-    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : undefined;
-    observer?.observe(canvas);
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : undefined;
+    resizeObserver?.observe(canvas);
+    const attributeObserver = shell && typeof MutationObserver === 'function' ? new MutationObserver(buildStructures) : undefined;
+    if (attributeObserver && shell) attributeObserver.observe(shell, { attributes: true, attributeFilter: ['data-decoration', 'data-decoration-color'] });
     renderer.setAnimationLoop((time) => {
       const seconds = time / 1000;
-      orb.rotation.x = seconds * 0.08;
-      orb.rotation.y = seconds * 0.14;
-      ring.rotation.x = seconds * 0.05;
-      ring.rotation.y = seconds * -0.08;
+      if (activeDecoration === 'orb') {
+        structures[0]?.rotation.set(seconds * 0.08, seconds * 0.14, 0);
+        structures[1]?.rotation.set(seconds * 0.05, seconds * -0.08, 0);
+      } else if (activeDecoration === 'rings') {
+        structures.forEach((ring, index) => {
+          ring.rotation.x += 0.0015 * (index + 1);
+          ring.rotation.y -= 0.002 * (index + 1);
+          ring.rotation.z = Math.sin(seconds * 0.45 + index) * 0.25;
+        });
+      } else if (activeDecoration === 'particles') {
+        structures[0]?.rotation.set(seconds * 0.04, seconds * 0.12, seconds * 0.02);
+      } else if (activeDecoration === 'grid') {
+        if (structures[0]) structures[0].rotation.z = seconds * 0.05;
+      }
       group.position.y = Math.sin(seconds * 0.7) * 0.08;
       renderer.render(scene, camera);
     });
 
     return () => {
-      observer?.disconnect();
+      resizeObserver?.disconnect();
+      attributeObserver?.disconnect();
       renderer.setAnimationLoop(null);
-      orb.geometry.dispose();
-      ring.geometry.dispose();
-      halo.geometry.dispose();
-      orb.material.dispose();
-      ring.material.dispose();
-      halo.material.dispose();
+      clearStructures();
       renderer.dispose();
     };
   },

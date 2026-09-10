@@ -9,6 +9,11 @@ import {
   PRESENTATION_INTENTIONS,
   PRESENTATION_LAYOUTS,
   PRESENTATION_TRANSITIONS,
+  PRESENTATION_BACKGROUND_TYPES,
+  PRESENTATION_THEMES,
+  PRESENTATION_THEME_GRADIENTS,
+  PRESENTATION_DECORATIONS,
+  PRESENTATION_DECORATION_DEFAULT_COLOR,
 } from '../shared/presentation';
 import type {
   CreatePresentationInput,
@@ -35,10 +40,37 @@ function readStoreInput(value: unknown): PresentationStoreInput | undefined {
   if (!isRecord(value)) return undefined;
   if (typeof value.title !== 'string' || typeof value.audience !== 'string' || typeof value.objective !== 'string' || !Array.isArray(value.sections)) return undefined;
   const sections = value.sections as readonly PresentationSection[];
+  const backgroundTheme = PRESENTATION_THEMES.includes(value.backgroundTheme as (typeof PRESENTATION_THEMES)[number])
+    ? value.backgroundTheme as (typeof PRESENTATION_THEMES)[number]
+    : 'aurora';
+  const gradient = PRESENTATION_THEME_GRADIENTS[backgroundTheme];
   return {
     layout: PRESENTATION_LAYOUTS.includes(value.layout as (typeof PRESENTATION_LAYOUTS)[number])
       ? value.layout as (typeof PRESENTATION_LAYOUTS)[number]
       : 'desktop',
+    backgroundType: PRESENTATION_BACKGROUND_TYPES.includes(value.backgroundType as (typeof PRESENTATION_BACKGROUND_TYPES)[number])
+      ? value.backgroundType as (typeof PRESENTATION_BACKGROUND_TYPES)[number]
+      : 'theme',
+    backgroundTheme,
+    backgroundUrl: typeof value.backgroundUrl === 'string' ? value.backgroundUrl.trim() : '',
+    backgroundGradientStart: typeof value.backgroundGradientStart === 'string' && /^#[0-9a-f]{6}$/i.test(value.backgroundGradientStart)
+      ? value.backgroundGradientStart
+      : gradient.start,
+    backgroundGradientMiddle: typeof value.backgroundGradientMiddle === 'string' && /^#[0-9a-f]{6}$/i.test(value.backgroundGradientMiddle)
+      ? value.backgroundGradientMiddle
+      : gradient.middle,
+    backgroundGradientEnd: typeof value.backgroundGradientEnd === 'string' && /^#[0-9a-f]{6}$/i.test(value.backgroundGradientEnd)
+      ? value.backgroundGradientEnd
+      : gradient.end,
+    backgroundGradientAngle: typeof value.backgroundGradientAngle === 'number' && Number.isFinite(value.backgroundGradientAngle)
+      ? Math.min(Math.max(Math.round(value.backgroundGradientAngle), 0), 360)
+      : gradient.angle,
+    backgroundDecoration: PRESENTATION_DECORATIONS.includes(value.backgroundDecoration as (typeof PRESENTATION_DECORATIONS)[number])
+      ? value.backgroundDecoration as (typeof PRESENTATION_DECORATIONS)[number]
+      : 'orb',
+    backgroundDecorationColor: typeof value.backgroundDecorationColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.backgroundDecorationColor)
+      ? value.backgroundDecorationColor
+      : PRESENTATION_DECORATION_DEFAULT_COLOR,
     title: value.title,
     audience: value.audience,
     objective: value.objective,
