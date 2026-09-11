@@ -6,6 +6,7 @@ import {
 } from './presentation-store';
 import {
   PRESENTATION_CODE_LANGUAGES,
+  PRESENTATION_DEMO_WORKSPACES,
   PRESENTATION_INTENTIONS,
   PRESENTATION_LAYOUTS,
   PRESENTATION_TRANSITIONS,
@@ -48,6 +49,9 @@ function readStoreInput(value: unknown): PresentationStoreInput | undefined {
     layout: PRESENTATION_LAYOUTS.includes(value.layout as (typeof PRESENTATION_LAYOUTS)[number])
       ? value.layout as (typeof PRESENTATION_LAYOUTS)[number]
       : 'desktop',
+    demoWorkspaceId: PRESENTATION_DEMO_WORKSPACES.includes(value.demoWorkspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number])
+      ? value.demoWorkspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number]
+      : 'none',
     backgroundType: PRESENTATION_BACKGROUND_TYPES.includes(value.backgroundType as (typeof PRESENTATION_BACKGROUND_TYPES)[number])
       ? value.backgroundType as (typeof PRESENTATION_BACKGROUND_TYPES)[number]
       : 'theme',

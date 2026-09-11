@@ -14,9 +14,14 @@ import {
   type PresentationMediaMimeType,
   type PresentationImageUploadInput,
 } from './src/shared/presentation';
+import { PRESENTATION_DEMO_WORKSPACES } from './src/shared/presentation';
+import { readDemoWorkspace } from './src/server/demo-workspaces';
 
 const typecheckStatusPath = new URL('./.craft/typecheck-status.json', import.meta.url);
 const starterPort = Number(process.env.CRAFT_STARTER_PORT ?? 4173);
+const presentationDatabasePath = process.env.CRAFT_PRESENTATION_DB_PATH
+  ? resolvePath(process.env.CRAFT_PRESENTATION_DB_PATH)
+  : resolvePath(import.meta.dirname, '.data/presentations.sqlite');
 
 function readTypecheckStatus(): { status: 'running' | 'passed' | 'failed' } {
   try {
@@ -129,7 +134,7 @@ function presentationImagesPlugin() {
 }
 
 function presentationApiPlugin() {
-  const api = createPresentationApi(resolvePath(import.meta.dirname, '.data/presentations.sqlite'));
+  const api = createPresentationApi(presentationDatabasePath);
   return {
     name: 'presentation-api',
     configureServer(server: ViteDevServer) {
@@ -151,6 +156,32 @@ function presentationApiPlugin() {
   };
 }
 
+function demoWorkspacePlugin() {
+  return {
+    name: 'demo-workspaces',
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use((request, response, next) => {
+        const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+        const match = pathname.match(/^\/api\/demo-workspaces\/([^/]+)$/);
+        if (request.method !== 'GET' || !match?.[1]) {
+          next();
+          return;
+        }
+        const workspaceId = decodeURIComponent(match[1]);
+        if (!PRESENTATION_DEMO_WORKSPACES.includes(workspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number])) {
+          sendJson(response, 404, { error: 'Demo workspace not found.' });
+          return;
+        }
+        try {
+          sendJson(response, 200, readDemoWorkspace(workspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number]));
+        } catch (error: unknown) {
+          sendJson(response, 500, { error: error instanceof Error ? error.message : 'Unable to read demo workspace.' });
+        }
+      });
+    },
+  };
+}
+
 
 
 export default defineConfig({
@@ -158,6 +189,7 @@ export default defineConfig({
     craftTypecheckStatusPlugin(),
     presentationImagesPlugin(),
     presentationApiPlugin(),
+    demoWorkspacePlugin(),
     // Evaluates every *.style.ts in Node and emits the generated sheet.
     craftStyle({ dumpPath: '.craft/style-graph.json', alias: {
     '@craft-ts/style': resolvePath(import.meta.dirname, 'node_modules/@craft-ts/style/src/index.js')

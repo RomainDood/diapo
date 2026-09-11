@@ -29,6 +29,27 @@ The generated demo pages have already been removed. Product work starts in
 `src/app/features/presentation/`. The local development database is created at
 `.data/presentations.sqlite` and is ignored by Git.
 
+## Démonstration live
+
+Une présentation préchargée est disponible dans la bibliothèque :
+`Les ressources suivent les routes` (`presentation-angular-route-resources`).
+Elle est associée au projet local `/Users/romaingeffrault/Documents/ChatGPT/stackblitz`.
+
+Pour préparer la démonstration, lancer les deux applications dans deux terminaux :
+
+```bash
+# Dans diapo
+npm run dev
+
+# Dans stackblitz
+pnpm start
+```
+
+Depuis la vue présentateur, ouvrir les notes puis cliquer sur `Code`. Le workspace
+permet de choisir un fichier, de rechercher dans les sources et d’utiliser
+`Ctrl/Cmd + P` pour l’ouverture rapide. Les liens `http://localhost:4200/...`
+ouvrent les scénarios Angular directement dans la scène.
+
 The browser type-check runs beside Vite. Its status is visible in the page;
 the same command writes the status used by CI. Raw console.* calls are not
 forwarded to the log MCP server: use Craft Console.* for searchable entries.

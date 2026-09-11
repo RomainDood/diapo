@@ -8,6 +8,7 @@ import {
   type CreatePresentationInput,
   type PresentationDocument,
   PRESENTATION_CODE_LANGUAGES,
+  PRESENTATION_DEMO_WORKSPACES,
   PRESENTATION_LAYOUTS,
   PRESENTATION_INTENTIONS,
   type PresentationSection,
@@ -26,6 +27,7 @@ import {
   type PresentationIntention,
   type PresentationTransition,
 } from '../shared/presentation';
+import { ROUTE_RESOURCES_PRESENTATION } from '../shared/route-resources-presentation';
 
 export class PresentationStoreError extends Data.TaggedError('PresentationStoreError')<{
   readonly message: string;
@@ -46,6 +48,7 @@ export class PresentationStore extends Context.Service<PresentationStore, Presen
 type PresentationRow = {
   id: string;
   layout: string;
+  demo_workspace: string;
   background_type: string;
   background_theme: string;
   background_url: string;
@@ -129,6 +132,12 @@ function presentationLayout(value: string): PresentationStoreInput['layout'] {
   return PRESENTATION_LAYOUTS.includes(value as PresentationStoreInput['layout'])
     ? value as PresentationStoreInput['layout']
     : 'desktop';
+}
+
+function presentationDemoWorkspace(value: string): PresentationStoreInput['demoWorkspaceId'] {
+  return PRESENTATION_DEMO_WORKSPACES.includes(value as PresentationStoreInput['demoWorkspaceId'])
+    ? value as PresentationStoreInput['demoWorkspaceId']
+    : 'none';
 }
 
 function presentationBackgroundType(value: string): PresentationBackgroundType {
@@ -242,6 +251,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
   const presentationColumnNames = new Set(presentationColumns.map((column) => column.name));
   const hadAllGradientColumns = ['background_gradient_start', 'background_gradient_middle', 'background_gradient_end', 'background_gradient_angle'].every((name) => presentationColumnNames.has(name));
   if (!presentationColumnNames.has('layout')) database.exec("ALTER TABLE presentations ADD COLUMN layout TEXT NOT NULL DEFAULT 'desktop'");
+  if (!presentationColumnNames.has('demo_workspace')) database.exec("ALTER TABLE presentations ADD COLUMN demo_workspace TEXT NOT NULL DEFAULT 'none'");
   if (!presentationColumnNames.has('cover_image_url')) database.exec("ALTER TABLE presentations ADD COLUMN cover_image_url TEXT NOT NULL DEFAULT ''");
   if (!presentationColumnNames.has('cover_image_alt')) database.exec("ALTER TABLE presentations ADD COLUMN cover_image_alt TEXT NOT NULL DEFAULT ''");
   if (!presentationColumnNames.has('background_type')) database.exec("ALTER TABLE presentations ADD COLUMN background_type TEXT NOT NULL DEFAULT 'theme'");
@@ -273,8 +283,8 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
   );
 
   const insertPresentation = database.prepare(
-    `INSERT INTO presentations (id, title, audience, objective, layout, background_type, background_theme, background_url, background_gradient_start, background_gradient_middle, background_gradient_end, background_gradient_angle, background_decoration, background_decoration_color, cover_image_url, cover_image_alt, duration_minutes, created_at, updated_at)
-     VALUES (@id, @title, @audience, @objective, @layout, @backgroundType, @backgroundTheme, @backgroundUrl, @backgroundGradientStart, @backgroundGradientMiddle, @backgroundGradientEnd, @backgroundGradientAngle, @backgroundDecoration, @backgroundDecorationColor, @coverImageUrl, @coverImageAlt, @durationMinutes, @createdAt, @updatedAt)`,
+    `INSERT INTO presentations (id, title, audience, objective, layout, demo_workspace, background_type, background_theme, background_url, background_gradient_start, background_gradient_middle, background_gradient_end, background_gradient_angle, background_decoration, background_decoration_color, cover_image_url, cover_image_alt, duration_minutes, created_at, updated_at)
+     VALUES (@id, @title, @audience, @objective, @layout, @demoWorkspaceId, @backgroundType, @backgroundTheme, @backgroundUrl, @backgroundGradientStart, @backgroundGradientMiddle, @backgroundGradientEnd, @backgroundGradientAngle, @backgroundDecoration, @backgroundDecorationColor, @coverImageUrl, @coverImageAlt, @durationMinutes, @createdAt, @updatedAt)`,
   );
   const insertSection = database.prepare(
     `INSERT INTO sections (id, presentation_id, position, title, intention)
@@ -285,13 +295,59 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
      VALUES (@id, @sectionId, @position, @title, @message, @notes, @durationMinutes, @transition, @code, @codeLanguage, @imageUrl, @imageAlt)`,
   );
 
+  const seedDocument = (id: string, input: PresentationStoreInput): void => {
+    if (database.prepare('SELECT 1 FROM presentations WHERE id = ?').get(id)) return;
+    const now = new Date().toISOString();
+    insertPresentation.run({
+      id,
+      title: input.title,
+      audience: input.audience,
+      objective: input.objective,
+      layout: input.layout,
+      demoWorkspaceId: input.demoWorkspaceId,
+      backgroundType: input.backgroundType,
+      backgroundTheme: input.backgroundTheme,
+      backgroundUrl: input.backgroundUrl,
+      backgroundGradientStart: input.backgroundGradientStart,
+      backgroundGradientMiddle: input.backgroundGradientMiddle,
+      backgroundGradientEnd: input.backgroundGradientEnd,
+      backgroundGradientAngle: input.backgroundGradientAngle,
+      backgroundDecoration: input.backgroundDecoration,
+      backgroundDecorationColor: input.backgroundDecorationColor,
+      coverImageUrl: input.coverImageUrl,
+      coverImageAlt: input.coverImageAlt,
+      durationMinutes: durationOf(input.sections),
+      createdAt: now,
+      updatedAt: now,
+    });
+    input.sections.forEach((section, sectionIndex) => {
+      insertSection.run({ id: section.id, presentationId: id, position: sectionIndex, title: section.title, intention: section.intention });
+      section.sequences.forEach((sequence, sequenceIndex) => {
+        insertSequence.run({
+          id: sequence.id,
+          sectionId: section.id,
+          position: sequenceIndex,
+          title: sequence.title,
+          message: sequence.message,
+          notes: sequence.notes,
+          durationMinutes: sequence.durationMinutes,
+          transition: sequence.transition,
+          code: sequence.code,
+          codeLanguage: sequence.codeLanguage,
+          imageUrl: sequence.imageUrl,
+          imageAlt: sequence.imageAlt,
+        });
+      });
+    });
+  };
+
   const writeDocument = database.transaction((id: string, input: PresentationStoreInput, timestamps: { readonly createdAt: string; readonly updatedAt: string }) => {
     database.prepare('DELETE FROM sections WHERE presentation_id = ?').run(id);
     database.prepare(
       `UPDATE presentations
-       SET title = ?, audience = ?, objective = ?, layout = ?, background_type = ?, background_theme = ?, background_url = ?, background_gradient_start = ?, background_gradient_middle = ?, background_gradient_end = ?, background_gradient_angle = ?, background_decoration = ?, background_decoration_color = ?, cover_image_url = ?, cover_image_alt = ?, duration_minutes = ?, updated_at = ?
+       SET title = ?, audience = ?, objective = ?, layout = ?, demo_workspace = ?, background_type = ?, background_theme = ?, background_url = ?, background_gradient_start = ?, background_gradient_middle = ?, background_gradient_end = ?, background_gradient_angle = ?, background_decoration = ?, background_decoration_color = ?, cover_image_url = ?, cover_image_alt = ?, duration_minutes = ?, updated_at = ?
        WHERE id = ?`,
-    ).run(input.title, input.audience, input.objective, input.layout, input.backgroundType, input.backgroundTheme, input.backgroundUrl, input.backgroundGradientStart, input.backgroundGradientMiddle, input.backgroundGradientEnd, input.backgroundGradientAngle, input.backgroundDecoration, input.backgroundDecorationColor, input.coverImageUrl, input.coverImageAlt, durationOf(input.sections), timestamps.updatedAt, id);
+    ).run(input.title, input.audience, input.objective, input.layout, input.demoWorkspaceId, input.backgroundType, input.backgroundTheme, input.backgroundUrl, input.backgroundGradientStart, input.backgroundGradientMiddle, input.backgroundGradientEnd, input.backgroundGradientAngle, input.backgroundDecoration, input.backgroundDecorationColor, input.coverImageUrl, input.coverImageAlt, durationOf(input.sections), timestamps.updatedAt, id);
     input.sections.forEach((section, sectionIndex) => {
       insertSection.run({
         id: section.id,
@@ -352,55 +408,16 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       durationMinutes: presentation.duration_minutes,
       sectionCount: sections.length,
       updatedAt: presentation.updated_at,
+      demoWorkspaceId: presentationDemoWorkspace(presentation.demo_workspace),
       sections,
     };
   }
 
   const count = database.prepare('SELECT COUNT(*) AS count FROM presentations').get() as { count: number };
   if (count.count === 0) {
-    const id = 'presentation-demo';
-    const now = new Date().toISOString();
-    insertPresentation.run({
-      id,
-      title: DEFAULT_PRESENTATION.title,
-      audience: DEFAULT_PRESENTATION.audience,
-      objective: DEFAULT_PRESENTATION.objective,
-      layout: DEFAULT_PRESENTATION.layout,
-      backgroundType: DEFAULT_PRESENTATION.backgroundType,
-      backgroundTheme: DEFAULT_PRESENTATION.backgroundTheme,
-      backgroundUrl: DEFAULT_PRESENTATION.backgroundUrl,
-      backgroundGradientStart: DEFAULT_PRESENTATION.backgroundGradientStart,
-      backgroundGradientMiddle: DEFAULT_PRESENTATION.backgroundGradientMiddle,
-      backgroundGradientEnd: DEFAULT_PRESENTATION.backgroundGradientEnd,
-      backgroundGradientAngle: DEFAULT_PRESENTATION.backgroundGradientAngle,
-      backgroundDecoration: DEFAULT_PRESENTATION.backgroundDecoration,
-      backgroundDecorationColor: DEFAULT_PRESENTATION.backgroundDecorationColor,
-      coverImageUrl: DEFAULT_PRESENTATION.coverImageUrl,
-      coverImageAlt: DEFAULT_PRESENTATION.coverImageAlt,
-      durationMinutes: durationOf(DEFAULT_PRESENTATION.sections),
-      createdAt: now,
-      updatedAt: now,
-    });
-    DEFAULT_PRESENTATION.sections.forEach((section, sectionIndex) => {
-      insertSection.run({ id: section.id, presentationId: id, position: sectionIndex, title: section.title, intention: section.intention });
-      section.sequences.forEach((sequence, sequenceIndex) => {
-        insertSequence.run({
-          id: sequence.id,
-          sectionId: section.id,
-          position: sequenceIndex,
-          title: sequence.title,
-          message: sequence.message,
-          notes: sequence.notes,
-          durationMinutes: sequence.durationMinutes,
-          transition: sequence.transition,
-          code: sequence.code,
-          codeLanguage: sequence.codeLanguage,
-          imageUrl: sequence.imageUrl,
-          imageAlt: sequence.imageAlt,
-        });
-      });
-    });
+    seedDocument('presentation-demo', DEFAULT_PRESENTATION);
   }
+  seedDocument('presentation-angular-route-resources', ROUTE_RESOURCES_PRESENTATION);
 
   return {
     list: databaseEffect(() => {
@@ -427,7 +444,8 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       const now = new Date().toISOString();
       const initial: PresentationStoreInput = {
         ...input,
-      layout: 'desktop',
+        layout: 'desktop',
+        demoWorkspaceId: 'none',
         backgroundType: 'theme',
         backgroundTheme: 'aurora',
         backgroundUrl: '',
@@ -457,7 +475,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
           }],
         }],
       };
-      insertPresentation.run({ id, title: initial.title, audience: initial.audience, objective: initial.objective, layout: initial.layout, backgroundType: initial.backgroundType, backgroundTheme: initial.backgroundTheme, backgroundUrl: initial.backgroundUrl, backgroundGradientStart: initial.backgroundGradientStart, backgroundGradientMiddle: initial.backgroundGradientMiddle, backgroundGradientEnd: initial.backgroundGradientEnd, backgroundGradientAngle: initial.backgroundGradientAngle, backgroundDecoration: initial.backgroundDecoration, backgroundDecorationColor: initial.backgroundDecorationColor, coverImageUrl: initial.coverImageUrl, coverImageAlt: initial.coverImageAlt, durationMinutes: durationOf(initial.sections), createdAt: now, updatedAt: now });
+      insertPresentation.run({ id, title: initial.title, audience: initial.audience, objective: initial.objective, layout: initial.layout, demoWorkspaceId: initial.demoWorkspaceId, backgroundType: initial.backgroundType, backgroundTheme: initial.backgroundTheme, backgroundUrl: initial.backgroundUrl, backgroundGradientStart: initial.backgroundGradientStart, backgroundGradientMiddle: initial.backgroundGradientMiddle, backgroundGradientEnd: initial.backgroundGradientEnd, backgroundGradientAngle: initial.backgroundGradientAngle, backgroundDecoration: initial.backgroundDecoration, backgroundDecorationColor: initial.backgroundDecorationColor, coverImageUrl: initial.coverImageUrl, coverImageAlt: initial.coverImageAlt, durationMinutes: durationOf(initial.sections), createdAt: now, updatedAt: now });
       writeDocument(id, initial, { createdAt: now, updatedAt: now });
       return read(id);
     }),

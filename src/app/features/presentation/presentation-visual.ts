@@ -42,7 +42,8 @@ export const threePresentationBackdrop = craftNodeDirective(
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-    camera.position.z = 7;
+    camera.position.set(0, 1.35, 7.5);
+    camera.lookAt(0, -0.55, 0);
     const group = new THREE.Group();
     scene.add(group);
 
@@ -80,9 +81,9 @@ export const threePresentationBackdrop = craftNodeDirective(
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         structures = [new THREE.Points(geometry, new THREE.PointsMaterial({ color, size: 0.045, transparent: true, opacity: 0.78 }))];
       } else if (activeDecoration === 'grid') {
-        const grid = new THREE.Mesh(new THREE.PlaneGeometry(7, 7, 20, 20), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.26, wireframe: true, side: THREE.DoubleSide }));
-        grid.rotation.x = Math.PI / 2;
-        grid.position.z = -0.4;
+        const grid = new THREE.Mesh(new THREE.PlaneGeometry(10, 16, 20, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, wireframe: true, side: THREE.DoubleSide }));
+        grid.rotation.x = -Math.PI / 2;
+        grid.position.set(0, -2.35, -1.4);
         structures = [grid];
       } else if (activeDecoration === 'orb') {
         const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(1.7, 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, wireframe: true }));
@@ -122,7 +123,7 @@ export const threePresentationBackdrop = craftNodeDirective(
       } else if (activeDecoration === 'particles') {
         structures[0]?.rotation.set(seconds * 0.04, seconds * 0.12, seconds * 0.02);
       } else if (activeDecoration === 'grid') {
-        if (structures[0]) structures[0].rotation.z = seconds * 0.05;
+        if (structures[0]) structures[0].position.z = -1.4 + (seconds % 1.6);
       }
       group.position.y = Math.sin(seconds * 0.7) * 0.08;
       renderer.render(scene, camera);

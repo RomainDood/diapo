@@ -1,6 +1,7 @@
 /* eslint-disable craft-ts/require-effect-adapters, craft-ts/require-primitive-derived-property, craft-ts/require-reactive-template-bindings, craft-ts/no-noninteractive-element-interactions, craft-ts/no-raw-class -- The stage is a keyboard-navigable composite presentation surface; its static visual classes are defined by the studio stylesheet. */
 import {
   a,
+  aside,
   button,
   craftComponent,
   div,
@@ -10,6 +11,7 @@ import {
   ifNode,
   iframe,
   img,
+  input,
   matchNode,
   p,
   pre,
@@ -23,9 +25,9 @@ import { assign, num, unit } from '@craft-ts/style';
 import type { ColorValue } from '@craft-ts/style';
 import { craftComputed, craftMethod, craftNodeDirective, query, state } from '@craft-ts/core';
 import { i18n } from '../../../i18n';
-import { loadPresentation } from '../../api';
+import { loadDemoWorkspace, loadPresentation } from '../../api';
 import { PRESENTATION_IMAGE_ALLOWED_ORIGINS, PRESENTATION_THEME_GRADIENTS } from '../../../shared/presentation';
-import type { PresentationSequence } from '../../../shared/presentation';
+import type { PresentationDemoWorkspaceFile, PresentationDemoWorkspaceId, PresentationSequence } from '../../../shared/presentation';
 import { highlightCodeTokens } from './code-highlighter';
 import { extractPresentationNoteParts } from './presentation-links';
 import { presentationGradientVars, presentationProgressVars, presentationSlideVars } from '../../ui/ui.style';
@@ -77,6 +79,31 @@ function safePresentationEmbeddedUrl(url: string): string {
   }
 }
 
+const applyPresentationGradient = craftNodeDirective(
+  'applyPresentationGradient',
+  [],
+  ({ element }) => {
+    const shell = element as HTMLElement;
+    const sync = () => {
+      const start = shell.dataset.gradientStart ?? PRESENTATION_THEME_GRADIENTS.aurora.start;
+      const middle = shell.dataset.gradientMiddle ?? PRESENTATION_THEME_GRADIENTS.aurora.middle;
+      const end = shell.dataset.gradientEnd ?? PRESENTATION_THEME_GRADIENTS.aurora.end;
+      const angle = Number(shell.dataset.gradientAngle ?? PRESENTATION_THEME_GRADIENTS.aurora.angle);
+      const values = {
+        ...assign(presentationGradientVars.start, cssColor(start)),
+        ...assign(presentationGradientVars.middle, cssColor(middle)),
+        ...assign(presentationGradientVars.end, cssColor(end)),
+        ...assign(presentationGradientVars.angle, unit.deg(Number.isFinite(angle) ? angle : PRESENTATION_THEME_GRADIENTS.aurora.angle)),
+      };
+      Object.entries(values).forEach(([property, value]) => shell.style.setProperty(property, String(value)));
+    };
+    sync();
+    const observer = typeof MutationObserver === 'function' ? new MutationObserver(sync) : undefined;
+    observer?.observe(shell, { attributes: true, attributeFilter: ['data-gradient-start', 'data-gradient-middle', 'data-gradient-end', 'data-gradient-angle'] });
+    return () => observer?.disconnect();
+  },
+);
+
 const EMPTY_SLIDE: PresentationSequence = {
   id: '',
   title: '',
@@ -94,6 +121,281 @@ type PresentationImageViewer = {
   url: string;
   alt: string;
 };
+
+type ActiveCodeWorkspace = {
+  readonly id: PresentationDemoWorkspaceId;
+};
+
+type PresentationAnnotationTool = 'pointer' | 'pen' | 'highlighter' | 'arrow' | 'rectangle' | 'eraser';
+type PresentationAnnotationCommand = PresentationAnnotationTool | 'undo' | 'clear';
+type PresentationAnnotationPoint = { x: number; y: number };
+type PresentationAnnotationStroke = {
+  tool: Exclude<PresentationAnnotationTool, 'pointer'>;
+  points: readonly PresentationAnnotationPoint[];
+};
+
+const presentationAnnotationShortcuts: Record<PresentationAnnotationCommand, string> = {
+  pointer: 'V',
+  pen: 'P',
+  highlighter: 'H',
+  arrow: 'A',
+  rectangle: 'R',
+  eraser: 'E',
+  undo: 'Ctrl/Cmd+Z',
+  clear: 'Shift+Delete',
+};
+
+function annotationActionTitle(label: string, command: PresentationAnnotationCommand): string {
+  return `${label} · ${presentationAnnotationShortcuts[command]}`;
+}
+
+const focusCodeWorkspaceInput = craftNodeDirective(
+  'focusCodeWorkspaceInput',
+  [],
+  ({ element }) => {
+    queueMicrotask(() => {
+      if (element instanceof HTMLInputElement) {
+        element.focus();
+        element.select();
+      }
+    });
+  },
+);
+
+function annotationStrokeStyle(context: CanvasRenderingContext2D, tool: PresentationAnnotationStroke['tool']): void {
+  context.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
+  context.globalAlpha = tool === 'highlighter' ? 0.38 : 0.95;
+  context.strokeStyle = tool === 'highlighter' ? '#ffe45c' : '#ff3d81';
+  context.lineWidth = tool === 'highlighter' ? 22 : tool === 'eraser' ? 30 : 4;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+}
+
+function drawAnnotationStroke(context: CanvasRenderingContext2D, stroke: PresentationAnnotationStroke): void {
+  const [firstPoint, ...remainingPoints] = stroke.points;
+  if (!firstPoint) return;
+  const lastPoint = stroke.points[stroke.points.length - 1] ?? firstPoint;
+  context.save();
+  annotationStrokeStyle(context, stroke.tool);
+
+  if (stroke.tool === 'rectangle') {
+    context.strokeRect(
+      Math.min(firstPoint.x, lastPoint.x),
+      Math.min(firstPoint.y, lastPoint.y),
+      Math.abs(lastPoint.x - firstPoint.x),
+      Math.abs(lastPoint.y - firstPoint.y),
+    );
+    context.restore();
+    return;
+  }
+
+  if (stroke.tool === 'arrow') {
+    const angle = Math.atan2(lastPoint.y - firstPoint.y, lastPoint.x - firstPoint.x);
+    const headLength = 14;
+    context.beginPath();
+    context.moveTo(firstPoint.x, firstPoint.y);
+    context.lineTo(lastPoint.x, lastPoint.y);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(lastPoint.x - headLength * Math.cos(angle - Math.PI / 6), lastPoint.y - headLength * Math.sin(angle - Math.PI / 6));
+    context.lineTo(lastPoint.x, lastPoint.y);
+    context.lineTo(lastPoint.x - headLength * Math.cos(angle + Math.PI / 6), lastPoint.y - headLength * Math.sin(angle + Math.PI / 6));
+    context.stroke();
+    context.restore();
+    return;
+  }
+
+  context.beginPath();
+  context.moveTo(firstPoint.x, firstPoint.y);
+  if (remainingPoints.length === 0) {
+    context.arc(firstPoint.x, firstPoint.y, Math.max(1, context.lineWidth / 2), 0, Math.PI * 2);
+  } else if (remainingPoints.length === 1) {
+    context.lineTo(remainingPoints[0].x, remainingPoints[0].y);
+  } else {
+    for (let index = 0; index < remainingPoints.length - 1; index += 1) {
+      const point = remainingPoints[index];
+      const nextPoint = remainingPoints[index + 1];
+      context.quadraticCurveTo(point.x, point.y, (point.x + nextPoint.x) / 2, (point.y + nextPoint.y) / 2);
+    }
+    const penultimatePoint = remainingPoints[remainingPoints.length - 1];
+    context.quadraticCurveTo(penultimatePoint.x, penultimatePoint.y, lastPoint.x, lastPoint.y);
+  }
+  context.stroke();
+  context.restore();
+}
+
+const presentationAnnotationCanvas = craftNodeDirective(
+  'presentationAnnotationCanvas',
+  [],
+  ({ element }) => {
+    const canvas = element as HTMLCanvasElement;
+    const slide = canvas.closest<HTMLElement>('.presentation-stage__slide');
+    const stage = canvas.closest<HTMLElement>('.presentation-stage');
+    const context = canvas.getContext('2d');
+    if (!slide || !stage || !context) return;
+    const shell = stage.closest<HTMLElement>('.presentation-shell');
+
+    let strokes: PresentationAnnotationStroke[] = [];
+    let currentStroke: PresentationAnnotationStroke | undefined;
+    let disposed = false;
+
+    const syncToolbar = () => {
+      const tool = (canvas.dataset.annotationTool ?? 'pointer') as PresentationAnnotationTool;
+      canvas.dataset.annotationActive = String(tool !== 'pointer');
+      shell?.querySelectorAll<HTMLElement>('.presentation-annotation-toolbar [data-annotation-tool]').forEach((control) => {
+        const active = control.dataset.annotationTool === tool;
+        control.dataset.active = String(active);
+        control.setAttribute('aria-pressed', String(active));
+      });
+      shell?.querySelectorAll<HTMLButtonElement>('.presentation-annotation-toolbar [data-annotation-action="undo"], .presentation-annotation-toolbar [data-annotation-action="clear"]').forEach((control) => {
+        control.disabled = strokes.length === 0;
+      });
+    };
+    const resize = () => {
+      const bounds = canvas.getBoundingClientRect();
+      const pixelRatio = canvas.ownerDocument.defaultView?.devicePixelRatio ?? 1;
+      canvas.width = Math.max(1, Math.round(bounds.width * pixelRatio));
+      canvas.height = Math.max(1, Math.round(bounds.height * pixelRatio));
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(0, 0, bounds.width, bounds.height);
+      for (const stroke of strokes) drawAnnotationStroke(context, stroke);
+    };
+    const pointFromEvent = (event: PointerEvent): PresentationAnnotationPoint => {
+      const bounds = canvas.getBoundingClientRect();
+      return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+    };
+    const redraw = () => {
+      const bounds = canvas.getBoundingClientRect();
+      context.clearRect(0, 0, bounds.width, bounds.height);
+      for (const stroke of strokes) drawAnnotationStroke(context, stroke);
+      syncToolbar();
+    };
+    const command = (value: PresentationAnnotationCommand) => {
+      if (value === 'pointer' || value === 'pen' || value === 'highlighter' || value === 'arrow' || value === 'rectangle' || value === 'eraser') {
+        canvas.dataset.annotationTool = value;
+      } else if (value === 'undo') {
+        strokes = strokes.slice(0, -1);
+        redraw();
+      } else if (value === 'clear') {
+        strokes = [];
+        redraw();
+      }
+      syncToolbar();
+    };
+    const onCommand = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const value = event.detail;
+      if (value === 'pointer' || value === 'pen' || value === 'highlighter' || value === 'arrow' || value === 'rectangle' || value === 'eraser' || value === 'undo' || value === 'clear') {
+        command(value);
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || canvas.dataset.annotationTool === 'pointer') return;
+      const tool = canvas.dataset.annotationTool as PresentationAnnotationStroke['tool'];
+      if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'arrow' && tool !== 'rectangle' && tool !== 'eraser') return;
+      currentStroke = { tool, points: [pointFromEvent(event)] };
+      strokes = [...strokes, currentStroke];
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!currentStroke) return;
+      currentStroke = { ...currentStroke, points: [...currentStroke.points, pointFromEvent(event)] };
+      strokes = [...strokes.slice(0, -1), currentStroke];
+      redraw();
+      event.preventDefault();
+    };
+    const stopDrawing = (event: PointerEvent) => {
+      if (!currentStroke) return;
+      currentStroke = undefined;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      syncToolbar();
+    };
+    const onKeydown = (event: KeyboardEvent) => {
+      const isShortcut = event.ctrlKey || event.metaKey;
+      if (event.key === 'Escape' && canvas.dataset.annotationTool !== 'pointer') {
+        event.preventDefault();
+        command('pointer');
+        return;
+      }
+      if (isShortcut && event.key.toLowerCase() === 'z' && strokes.length > 0) {
+        event.preventDefault();
+        command('undo');
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+      if (!isShortcut && !event.altKey) {
+        const tool = ({ v: 'pointer', p: 'pen', h: 'highlighter', a: 'arrow', r: 'rectangle', e: 'eraser' } as const)[event.key.toLowerCase()];
+        if (tool) {
+          event.preventDefault();
+          command(tool);
+        } else if (event.shiftKey && event.key === 'Delete') {
+          event.preventDefault();
+          command('clear');
+        }
+      }
+    };
+
+    canvas.addEventListener('presentation-annotation-command', onCommand);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', stopDrawing);
+    canvas.addEventListener('pointercancel', stopDrawing);
+    shell?.addEventListener('keydown', onKeydown);
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
+    queueMicrotask(() => {
+      if (!disposed) {
+        resize();
+        syncToolbar();
+      }
+    });
+
+    return () => {
+      disposed = true;
+      resizeObserver.disconnect();
+      canvas.removeEventListener('presentation-annotation-command', onCommand);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', stopDrawing);
+      canvas.removeEventListener('pointercancel', stopDrawing);
+      shell?.removeEventListener('keydown', onKeydown);
+    };
+  },
+);
+
+const presentationAnnotationToolbar = craftNodeDirective(
+  'presentationAnnotationToolbar',
+  [],
+  ({ element }) => {
+    const toolbar = element as HTMLElement;
+    let cleanup: (() => void) | undefined;
+    let disposed = false;
+    queueMicrotask(() => {
+      if (disposed) return;
+      const shell = toolbar.closest<HTMLElement>('.presentation-shell');
+      const onClick = (event: MouseEvent) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const control = target.closest<HTMLElement>('[data-annotation-tool], [data-annotation-action]');
+        if (!control || !toolbar.contains(control)) return;
+        const command = control.dataset.annotationTool ?? control.dataset.annotationAction;
+        if (!command) return;
+        const canvas = shell?.querySelector<HTMLCanvasElement>('.presentation-stage .presentation-annotation-canvas');
+        if (!canvas) return;
+        canvas.dispatchEvent(new CustomEvent('presentation-annotation-command', { detail: command }));
+        event.preventDefault();
+      };
+      toolbar.addEventListener('click', onClick);
+      cleanup = () => toolbar.removeEventListener('click', onClick);
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  },
+);
 
 function clampImageViewerZoom(value: number): number {
   return Math.min(Math.max(value, 1), 4);
@@ -114,7 +416,13 @@ const dragPresentationSurface = craftNodeDirective(
   [],
   ({ element }) => {
     const handle = element as HTMLElement;
-    const surface = handle.dataset.dragSurface === 'notes' ? handle.parentElement?.parentElement : handle;
+    const surface = handle.dataset.dragSurface === 'notes'
+      ? handle.closest<HTMLElement>('.presentation-notes')
+      : handle.dataset.dragSurface === 'annotations'
+        ? handle.closest<HTMLElement>('.presentation-annotation-toolbar')
+        : handle.dataset.dragSurface === 'shortcuts'
+          ? handle.closest<HTMLElement>('.presentation-code-workspace__shortcuts')
+        : handle;
     if (!surface) return;
 
     let dragging = false;
@@ -310,6 +618,31 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         open: (url: string) => set(url),
         close: () => set(null),
       }));
+      const activeCodeWorkspace = yield* state('activeCodeWorkspace', null as ActiveCodeWorkspace | null, ({ set }) => ({
+        open: (value: ActiveCodeWorkspace) => set(value),
+        close: () => set(null),
+      }));
+      const codeFilesVisible = yield* state('codeFilesVisible', true, ({ set }) => ({
+        show: () => set(true),
+        hide: () => set(false),
+      }));
+      const codeQuickOpenVisible = yield* state('codeQuickOpenVisible', false, ({ set }) => ({
+        show: () => set(true),
+        hide: () => set(false),
+      }));
+      const codeFileQuery = yield* state('codeFileQuery', '', ({ set }) => ({
+        setQuery: (value: string) => set(value),
+      }));
+      const codeSearchVisible = yield* state('codeSearchVisible', false, ({ set }) => ({
+        show: () => set(true),
+        hide: () => set(false),
+      }));
+      const codeSearchQuery = yield* state('codeSearchQuery', '', ({ set }) => ({
+        setQuery: (value: string) => set(value),
+      }));
+      const selectedCodePath = yield* state('selectedCodePath', '', ({ set }) => ({
+        select: (value: string) => set(value),
+      }));
       const imageViewer = yield* state('imageViewer', null as PresentationImageViewer | null, ({ set }) => ({
         open: (value: PresentationImageViewer) => set(value),
         close: () => set(null),
@@ -338,23 +671,16 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       const showStage = craftComputed('showStage', function* () {
         return !(yield* overview());
       });
+      const demoWorkspace = yield* query('presentationDemoWorkspace', {
+        params: function* () {
+          return (yield* presentation.value())?.demoWorkspaceId ?? 'none';
+        },
+        loader: function* ({ params }) {
+          return yield* loadDemoWorkspace(params);
+        },
+      });
       const hasImageViewer = craftComputed('hasImageViewer', function* () {
         return Boolean(yield* imageViewer());
-      });
-      const presentationGradientStyle = craftComputed('presentationGradientStyle', function* () {
-        const document = yield* presentation.value();
-        const gradient = document ?? {
-          backgroundGradientStart: PRESENTATION_THEME_GRADIENTS.aurora.start,
-          backgroundGradientMiddle: PRESENTATION_THEME_GRADIENTS.aurora.middle,
-          backgroundGradientEnd: PRESENTATION_THEME_GRADIENTS.aurora.end,
-          backgroundGradientAngle: PRESENTATION_THEME_GRADIENTS.aurora.angle,
-        };
-        return {
-          ...assign(presentationGradientVars.start, cssColor(gradient.backgroundGradientStart)),
-          ...assign(presentationGradientVars.middle, cssColor(gradient.backgroundGradientMiddle)),
-          ...assign(presentationGradientVars.end, cssColor(gradient.backgroundGradientEnd)),
-          ...assign(presentationGradientVars.angle, unit.deg(gradient.backgroundGradientAngle)),
-        };
       });
       const slides = craftComputed('slides', function* () {
         const document = yield* presentation.value();
@@ -405,8 +731,42 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       const hasActiveLink = craftComputed('hasActiveLink', function* () {
         return Boolean(yield* activeLink());
       });
+      const hasActiveCodeWorkspace = craftComputed('hasActiveCodeWorkspace', function* () {
+        return Boolean(yield* activeCodeWorkspace());
+      });
+      const hasDemoWorkspace = craftComputed('hasDemoWorkspace', function* () {
+        return (yield* demoWorkspace.value())?.id !== 'none';
+      });
       const showOverviewContent = craftComputed('showOverviewContent', function* () {
-        return !(yield* hasActiveLink());
+        return !(yield* hasActiveLink()) && !(yield* hasActiveCodeWorkspace());
+      });
+      const workspaceFiles = craftComputed('workspaceFiles', function* () {
+        return (yield* demoWorkspace.value())?.files ?? [];
+      });
+      const visibleWorkspaceFiles = craftComputed('visibleWorkspaceFiles', function* () {
+        const queryValue = (yield* codeFileQuery()).trim().toLowerCase();
+        return (yield* workspaceFiles()).filter((file) => !queryValue || file.path.toLowerCase().includes(queryValue));
+      });
+      const selectedWorkspaceFile = craftComputed('selectedWorkspaceFile', function* () {
+        const files = yield* workspaceFiles();
+        const selectedPath = yield* selectedCodePath();
+        const selected = files.find((file) => file.path === selectedPath);
+        return selected ?? files[0] ?? null;
+      });
+      const highlightedWorkspaceCode = craftComputed('highlightedWorkspaceCode', function* () {
+        const file = yield* selectedWorkspaceFile();
+        return file ? highlightCodeTokens(file.content, file.language) : [];
+      });
+      const workspaceSearchMatches = craftComputed('workspaceSearchMatches', function* () {
+        const queryValue = (yield* codeSearchQuery()).trim().toLowerCase();
+        if (!queryValue) return [] as readonly PresentationDemoWorkspaceFile[];
+        return (yield* workspaceFiles()).filter((file) => file.content.toLowerCase().includes(queryValue));
+      });
+      const codeFileListVisible = craftComputed('codeFileListVisible', function* () {
+        return !(yield* codeSearchVisible());
+      });
+      const noWorkspaceFiles = craftComputed('noWorkspaceFiles', function* () {
+        return (yield* workspaceFiles()).length === 0;
       });
       const slideItems = craftComputed('slideItems', function* () {
         const slide = yield* currentSlide();
@@ -455,6 +815,41 @@ function createPresentationPage(name: string, presenterMode: boolean) {
           }
           return;
         }
+        if (yield* activeCodeWorkspace()) {
+          const isShortcut = event.ctrlKey || event.metaKey;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            if (yield* codeQuickOpenVisible()) yield* codeQuickOpenVisible.hide();
+            else {
+              yield* activeCodeWorkspace.close();
+              yield* codeSearchVisible.hide();
+              yield* codeFileQuery.setQuery('');
+              yield* codeSearchQuery.setQuery('');
+              if (!(yield* linkReturnState())) yield* overview.hide();
+              yield* linkReturnState.clear();
+            }
+            return;
+          }
+          if (isShortcut && event.key.toLowerCase() === 'p') {
+            event.preventDefault();
+            yield* codeQuickOpenVisible.show();
+            yield* codeSearchVisible.hide();
+            return;
+          }
+          if (isShortcut && event.key.toLowerCase() === 'b') {
+            event.preventDefault();
+            if (yield* codeFilesVisible()) yield* codeFilesVisible.hide(); else yield* codeFilesVisible.show();
+            return;
+          }
+          if (isShortcut && event.shiftKey && event.key.toLowerCase() === 'f') {
+            event.preventDefault();
+            if (!(yield* codeFilesVisible())) yield* codeFilesVisible.show();
+            yield* codeSearchVisible.show();
+            yield* codeQuickOpenVisible.hide();
+            return;
+          }
+          return;
+        }
         const count = (yield* slides()).length;
         const current = yield* slideIndex();
         if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'PageDown') {
@@ -483,6 +878,9 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       const toggleNotes = craftMethod('toggleNotes', function* () {
         if (yield* notesVisible()) yield* notesVisible.hide(); else yield* notesVisible.show();
       });
+      const toggleCodeFiles = craftMethod('toggleCodeFiles', function* () {
+        if (yield* codeFilesVisible()) yield* codeFilesVisible.hide(); else yield* codeFilesVisible.show();
+      });
       const openPresentationLink = craftMethod('openPresentationLink', function* (url: string) {
         const safeUrlValue = safePresentationLinkUrl(url);
         if (safeUrlValue) {
@@ -491,15 +889,36 @@ function createPresentationPage(name: string, presenterMode: boolean) {
           yield* activeLink.open(safeUrlValue);
         }
       });
+      const openCodeWorkspace = craftMethod('openCodeWorkspace', function* () {
+        const workspaceId = (yield* presentation.value())?.demoWorkspaceId ?? 'none';
+        if (workspaceId === 'none') return;
+        yield* linkReturnState.remember(yield* overview());
+        yield* overview.show();
+        yield* activeLink.close();
+        yield* activeCodeWorkspace.open({ id: workspaceId });
+      });
+      const closeCodeWorkspace = craftMethod('closeCodeWorkspace', function* () {
+        yield* activeCodeWorkspace.close();
+        yield* codeQuickOpenVisible.hide();
+        yield* codeSearchVisible.hide();
+        yield* codeFileQuery.setQuery('');
+        yield* codeSearchQuery.setQuery('');
+        if (!(yield* linkReturnState())) yield* overview.hide();
+        yield* linkReturnState.clear();
+      });
+      const selectCodeFile = craftMethod('selectCodeFile', function* (path: string) {
+        yield* selectedCodePath.select(path);
+        yield* codeQuickOpenVisible.hide();
+      });
       const closePresentationLink = craftMethod('closePresentationLink', function* () {
         yield* activeLink.close();
         if (!(yield* linkReturnState())) yield* overview.hide();
         yield* linkReturnState.clear();
       });
-      return { presentation, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, presentationGradientStyle, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, imageViewer, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, openImageViewer, closeImageViewer, presentationId };
+      return { presentation, demoWorkspace, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, hasActiveCodeWorkspace, hasDemoWorkspace, showOverviewContent, activeLink, activeCodeWorkspace, codeFilesVisible, codeQuickOpenVisible, codeFileQuery, codeSearchVisible, codeSearchQuery, selectedCodePath, visibleWorkspaceFiles, selectedWorkspaceFile, highlightedWorkspaceCode, workspaceSearchMatches, codeFileListVisible, noWorkspaceFiles, imageViewer, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, toggleCodeFiles, openPresentationLink, closePresentationLink, openCodeWorkspace, closeCodeWorkspace, selectCodeFile, openImageViewer, closeImageViewer, presentationId };
     },
-    ({ presentation, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, presentationGradientStyle, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, showOverviewContent, activeLink, imageViewer, slideItems, next, previous, selectSlide, toggleNotes, openPresentationLink, closePresentationLink, openImageViewer, closeImageViewer, handleKeydown, presentationId }) =>
-      div({ class: 'presentation-shell', style: presentationGradientStyle, 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-theme': function* () { return (yield* presentation.value())?.backgroundTheme ?? 'aurora'; }, 'data-background-type': function* () { return (yield* presentation.value())?.backgroundType ?? 'theme'; }, 'data-decoration': function* () { return (yield* presentation.value())?.backgroundDecoration ?? 'orb'; }, 'data-decoration-color': function* () { return (yield* presentation.value())?.backgroundDecorationColor ?? '#f736e3'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
+    ({ presentation, demoWorkspace, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, hasActiveCodeWorkspace, hasDemoWorkspace, showOverviewContent, activeLink, codeFilesVisible, codeQuickOpenVisible, codeFileQuery, codeSearchVisible, codeSearchQuery, visibleWorkspaceFiles, selectedWorkspaceFile, highlightedWorkspaceCode, workspaceSearchMatches, codeFileListVisible, noWorkspaceFiles, imageViewer, slideItems, next, previous, selectSlide, toggleNotes, toggleCodeFiles, openPresentationLink, closePresentationLink, openCodeWorkspace, closeCodeWorkspace, selectCodeFile, openImageViewer, closeImageViewer, handleKeydown, presentationId }) =>
+      div({ class: 'presentation-shell', 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-theme': function* () { return (yield* presentation.value())?.backgroundTheme ?? 'aurora'; }, 'data-background-type': function* () { return (yield* presentation.value())?.backgroundType ?? 'theme'; }, 'data-gradient-start': function* () { return (yield* presentation.value())?.backgroundGradientStart ?? PRESENTATION_THEME_GRADIENTS.aurora.start; }, 'data-gradient-middle': function* () { return (yield* presentation.value())?.backgroundGradientMiddle ?? PRESENTATION_THEME_GRADIENTS.aurora.middle; }, 'data-gradient-end': function* () { return (yield* presentation.value())?.backgroundGradientEnd ?? PRESENTATION_THEME_GRADIENTS.aurora.end; }, 'data-gradient-angle': function* () { return String((yield* presentation.value())?.backgroundGradientAngle ?? PRESENTATION_THEME_GRADIENTS.aurora.angle); }, 'data-decoration': function* () { return (yield* presentation.value())?.backgroundDecoration ?? 'orb'; }, 'data-decoration-color': function* () { return (yield* presentation.value())?.backgroundDecorationColor ?? '#f736e3'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
         // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationMediaUrl validates the protocol and origin.
         ifNode(hasBackgroundImage, () => img({ class: 'presentation-background-media', src: function* () { return safePresentationMediaUrl((yield* presentation.value())?.backgroundUrl ?? ''); }, alt: '' })),
         // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationMediaUrl validates the protocol and origin.
@@ -533,6 +952,39 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               iframe({ title: i18n.t('ui.presentation.linkViewer'), 'data-source': activeLink, loading: 'eager', referrerPolicy: 'no-referrer', sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin', allow: 'fullscreen; autoplay; picture-in-picture' }).pipe(embedPresentationLink),
             ]),
           ])),
+          ifNode(hasActiveCodeWorkspace, () => section({ class: 'presentation-code-workspace', 'aria-label': i18n.t('ui.presentation.codeWorkspace') }, [
+            div({ class: 'presentation-code-workspace__topbar' }, [
+              div({ class: 'presentation-code-workspace__heading' }, [
+                span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.codeWorkspaceEyebrow')),
+                span({ class: 'presentation-code-workspace__title' }, function* () { return (yield* demoWorkspace.value())?.title ?? ''; }),
+              ]),
+              div({ class: 'presentation-link-viewer__actions' }, [
+                button('toggleCodeFiles', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': function* () { return (yield* codeFilesVisible()) ? i18n.t('ui.presentation.hideCodeFiles') : i18n.t('ui.presentation.showCodeFiles'); }, title: function* () { return (yield* codeFilesVisible()) ? i18n.t('ui.presentation.hideCodeFiles') : i18n.t('ui.presentation.showCodeFiles'); }, click: toggleCodeFiles }, i18n.t('ui.presentation.files')),
+                button('toggleCodeWorkspaceSearch', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.searchCode'), click: function* () { if (yield* codeSearchVisible()) yield* codeSearchVisible.hide(); else { yield* codeFilesVisible.show(); yield* codeSearchVisible.show(); } } }, i18n.t('ui.presentation.searchCode')),
+                button('closeCodeWorkspace', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.closeCodeWorkspace'), click: closeCodeWorkspace }, i18n.t('ui.presentation.closeCodeWorkspace')),
+              ]),
+            ]),
+            div({ class: 'presentation-code-workspace__body', 'data-files-visible': function* () { return String(yield* codeFilesVisible()); } }, [
+              aside({ class: 'presentation-code-workspace__files' }, [
+                span({ class: 'presentation-code-workspace__files-title' }, i18n.t('ui.presentation.files')),
+                ifNode(codeSearchVisible, () => input('codeWorkspaceSearch', { type: 'search', class: 'presentation-code-workspace__search', 'aria-label': i18n.t('ui.presentation.searchCode'), placeholder: i18n.t('ui.presentation.searchCodePlaceholder'), value: codeSearchQuery, *input(event) { yield* codeSearchQuery.setQuery((event.target as HTMLInputElement).value); } }).pipe(focusCodeWorkspaceInput)),
+                ifNode(codeSearchVisible, () => forNode(workspaceSearchMatches, { track: (file) => file.path }, (fileInput) => button('codeSearchResult', { type: 'button', class: 'presentation-code-workspace__file', click: function* () { yield* selectCodeFile((yield* fileInput()).path); } }, function* () { return (yield* fileInput()).path; }))),
+                ifNode(codeFileListVisible, () => forNode(visibleWorkspaceFiles, { track: (file) => file.path }, (fileInput) => button('codeWorkspaceFile', { type: 'button', class: 'presentation-code-workspace__file', 'data-active': function* () { return String((yield* selectedWorkspaceFile())?.path === (yield* fileInput()).path); }, click: function* () { yield* selectCodeFile((yield* fileInput()).path); } }, function* () { return (yield* fileInput()).path; }))),
+                ifNode(noWorkspaceFiles, () => p({ class: 'presentation-code-workspace__empty' }, i18n.t('ui.presentation.noCodeFiles'))),
+              ]),
+              div({ class: 'presentation-code-workspace__editor' }, [
+                div({ class: 'presentation-code-workspace__tab' }, function* () { return (yield* selectedWorkspaceFile())?.path ?? i18n.t('ui.presentation.noCodeFiles'); }),
+                pre('workspaceCode', { class: 'presentation-code presentation-code--workspace', 'data-language': function* () { return (yield* selectedWorkspaceFile())?.language ?? 'typescript'; } }, forNode(highlightedWorkspaceCode, { track: (token) => token.id }, (tokenInput) => span({ class: function* () { return (yield* tokenInput()).className; } }, function* () { return (yield* tokenInput()).text; }))),
+              ]),
+            ]),
+            ifNode(codeQuickOpenVisible, () => div({ class: 'presentation-code-workspace__quick-open', role: 'dialog', 'aria-label': i18n.t('ui.presentation.quickOpen') }, [
+              div({ class: 'presentation-code-workspace__quick-open-card' }, [
+                span({ class: 'presentation-code-workspace__files-title' }, i18n.t('ui.presentation.quickOpen')),
+                input('codeWorkspaceQuickOpen', { type: 'search', class: 'presentation-code-workspace__search', 'aria-label': i18n.t('ui.presentation.quickOpen'), placeholder: i18n.t('ui.presentation.quickOpenPlaceholder'), value: codeFileQuery, *input(event) { yield* codeFileQuery.setQuery((event.target as HTMLInputElement).value); } }).pipe(focusCodeWorkspaceInput),
+                forNode(visibleWorkspaceFiles, { track: (file) => file.path }, (fileInput) => button('codeQuickOpenResult', { type: 'button', class: 'presentation-code-workspace__file', click: function* () { yield* selectCodeFile((yield* fileInput()).path); } }, function* () { return (yield* fileInput()).path; })),
+              ]),
+            ])),
+          ])),
           ifNode(showOverviewContent, () => [
             div({ class: 'presentation-overview__content' }, [
               // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
@@ -554,6 +1006,14 @@ function createPresentationPage(name: string, presenterMode: boolean) {
             ]),
           ]),
         ]).pipe(dragPresentationSurface)),
+        ifNode(hasActiveCodeWorkspace, () => div({ class: 'presentation-code-workspace__shortcuts', 'aria-label': i18n.t('ui.presentation.keyboardShortcuts') }, [
+          button('dragCodeWorkspaceShortcuts', { type: 'button', class: 'presentation-code-workspace__shortcuts-drag-handle', 'data-drag-surface': 'shortcuts', 'aria-label': i18n.t('ui.presentation.moveKeyboardShortcuts'), title: i18n.t('ui.presentation.moveKeyboardShortcuts') }, '↕').pipe(dragPresentationSurface),
+          span({ class: 'presentation-code-workspace__shortcuts-label' }, i18n.t('ui.presentation.keyboardShortcuts')),
+          span({ class: 'presentation-code-workspace__shortcut' }, [h('kbd', {}, 'Ctrl/Cmd+P'), span({}, i18n.t('ui.presentation.shortcutQuickOpen'))]),
+          span({ class: 'presentation-code-workspace__shortcut' }, [h('kbd', {}, 'Ctrl/Cmd+Shift+F'), span({}, i18n.t('ui.presentation.shortcutSearch'))]),
+          span({ class: 'presentation-code-workspace__shortcut' }, [h('kbd', {}, 'Ctrl/Cmd+B'), span({}, i18n.t('ui.presentation.shortcutFiles'))]),
+          span({ class: 'presentation-code-workspace__shortcut' }, [h('kbd', {}, 'Esc'), span({}, i18n.t('ui.presentation.shortcutBack'))]),
+        ])),
         ifNode(showStage, () => section({ class: 'presentation-stage', tabIndex: -1 }, [
           h('canvas', { class: 'presentation-stage__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
           div({ class: 'presentation-stage__glow' }),
@@ -569,6 +1029,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
               ifNode(hasImage, () => button('openImageViewer', { type: 'button', class: 'presentation-stage__image-trigger', 'aria-label': i18n.t('ui.presentation.openImageViewer'), title: i18n.t('ui.presentation.openImageViewer'), click: openImageViewer }, img({ class: 'presentation-stage__image', src: function* () { return safePresentationImageUrl((yield* currentSlide()).imageUrl); }, alt: function* () { return (yield* currentSlide()).imageAlt || i18n.t('ui.editor.imageAltFallback'); } }))),
               ifNode(hasCode, () => pre('slideCode', { class: 'presentation-code', 'data-language': function* () { return (yield* currentSlide()).codeLanguage; } }, forNode(highlightedCode, { track: (token) => token.id }, (tokenInput) => span({ class: function* () { return (yield* tokenInput()).className; } }, function* () { return (yield* tokenInput()).text; })))),
+              h('canvas', { class: 'presentation-annotation-canvas', 'data-annotation-tool': 'pointer', 'data-annotation-active': 'false', 'aria-hidden': true }).pipe(presentationAnnotationCanvas),
             ]),
           ),
           div({ class: 'presentation-stage__controls' }, [
@@ -586,6 +1047,18 @@ function createPresentationPage(name: string, presenterMode: boolean) {
             button('nextSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.next'), title: i18n.t('ui.presentation.next'), class: 'presentation-control presentation-control--icon', disabled: function* () { return (yield* slideIndex()) >= (yield* slides()).length - 1; }, click: next }, span({ 'aria-hidden': true }, '→')),
           ]),
         ]).pipe(focusPresentationStage)),
+        ifNode(showStage, () => div({ class: 'presentation-annotation-toolbar', role: 'toolbar', 'aria-label': i18n.t('ui.presentation.annotationToolbar') }, [
+          button('dragAnnotationToolbar', { type: 'button', class: 'presentation-annotation-toolbar__drag-handle', 'data-drag-surface': 'annotations', 'aria-label': i18n.t('ui.presentation.moveAnnotations'), title: i18n.t('ui.presentation.moveAnnotations') }, '↕').pipe(dragPresentationSurface),
+          button('annotationPointer', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'pointer', 'data-active': 'true', 'aria-pressed': true, 'aria-label': i18n.t('ui.presentation.annotationPointer'), 'aria-keyshortcuts': presentationAnnotationShortcuts.pointer, title: annotationActionTitle(i18n.t('ui.presentation.annotationPointer'), 'pointer'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationPointer'), 'pointer') }, '↖'),
+          button('annotationPen', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'pen', 'data-active': 'false', 'aria-pressed': false, 'aria-label': i18n.t('ui.presentation.annotationPen'), 'aria-keyshortcuts': presentationAnnotationShortcuts.pen, title: annotationActionTitle(i18n.t('ui.presentation.annotationPen'), 'pen'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationPen'), 'pen') }, '✎'),
+          button('annotationHighlighter', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'highlighter', 'data-active': 'false', 'aria-pressed': false, 'aria-label': i18n.t('ui.presentation.annotationHighlighter'), 'aria-keyshortcuts': presentationAnnotationShortcuts.highlighter, title: annotationActionTitle(i18n.t('ui.presentation.annotationHighlighter'), 'highlighter'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationHighlighter'), 'highlighter') }, '▰'),
+          button('annotationArrow', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'arrow', 'data-active': 'false', 'aria-pressed': false, 'aria-label': i18n.t('ui.presentation.annotationArrow'), 'aria-keyshortcuts': presentationAnnotationShortcuts.arrow, title: annotationActionTitle(i18n.t('ui.presentation.annotationArrow'), 'arrow'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationArrow'), 'arrow') }, '↗'),
+          button('annotationRectangle', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'rectangle', 'data-active': 'false', 'aria-pressed': false, 'aria-label': i18n.t('ui.presentation.annotationRectangle'), 'aria-keyshortcuts': presentationAnnotationShortcuts.rectangle, title: annotationActionTitle(i18n.t('ui.presentation.annotationRectangle'), 'rectangle'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationRectangle'), 'rectangle') }, '□'),
+          button('annotationEraser', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'eraser', 'data-active': 'false', 'aria-pressed': false, 'aria-label': i18n.t('ui.presentation.annotationEraser'), 'aria-keyshortcuts': presentationAnnotationShortcuts.eraser, title: annotationActionTitle(i18n.t('ui.presentation.annotationEraser'), 'eraser'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationEraser'), 'eraser') }, '⌫'),
+          span({ class: 'presentation-annotation-toolbar__separator', 'aria-hidden': true }),
+          button('annotationUndo', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-action': 'undo', 'aria-label': i18n.t('ui.presentation.annotationUndo'), 'aria-keyshortcuts': presentationAnnotationShortcuts.undo, title: annotationActionTitle(i18n.t('ui.presentation.annotationUndo'), 'undo'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationUndo'), 'undo'), disabled: true }, '↶'),
+          button('annotationClear', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-action': 'clear', 'aria-label': i18n.t('ui.presentation.annotationClear'), 'aria-keyshortcuts': presentationAnnotationShortcuts.clear, title: annotationActionTitle(i18n.t('ui.presentation.annotationClear'), 'clear'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationClear'), 'clear'), disabled: true }, '✕'),
+        ]).pipe(presentationAnnotationToolbar)),
         ifNode(hasImageViewer, () => div({ class: 'presentation-image-viewer', role: 'dialog', 'aria-modal': true, 'aria-label': i18n.t('ui.presentation.imageViewer'), tabIndex: -1 }, [
           div({ class: 'presentation-image-viewer__toolbar' }, [
             span({ class: 'presentation-image-viewer__title' }, i18n.t('ui.presentation.imageViewer')),
@@ -606,7 +1079,10 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         ifNode(showNotes, () => section({ class: 'presentation-notes' }, [
           div({ class: 'presentation-notes__header' }, [
             span({ class: 'studio-panel__label' }, i18n.t('ui.presentation.speakerNotes')),
-            button('dragSpeakerNotes', { type: 'button', class: 'presentation-notes__drag-handle', 'data-drag-surface': 'notes', 'aria-label': i18n.t('ui.presentation.moveNotes'), title: i18n.t('ui.presentation.moveNotes') }, '↕').pipe(dragPresentationSurface),
+            div({ class: 'presentation-notes__actions' }, [
+              ifNode(hasDemoWorkspace, () => button('openCodeWorkspace', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.openCodeWorkspace'), click: openCodeWorkspace }, i18n.t('ui.presentation.openCodeWorkspace'))),
+              button('dragSpeakerNotes', { type: 'button', class: 'presentation-notes__drag-handle', 'data-drag-surface': 'notes', 'aria-label': i18n.t('ui.presentation.moveNotes'), title: i18n.t('ui.presentation.moveNotes') }, '↕').pipe(dragPresentationSurface),
+            ]),
           ]),
           div({ class: 'presentation-notes__body' }, [
             forNode(noteParts, { track: (part) => part.id }, (notePartInput) => matchNode.exhaustive(notePartInput, 'kind', {
@@ -615,7 +1091,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
             })),
           ]),
         ])),
-      ]).pipe(focusPresentationStage),
+      ]).pipe(applyPresentationGradient).pipe(focusPresentationStage),
   );
 }
 

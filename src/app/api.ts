@@ -6,6 +6,8 @@ import type {
   PresentationImageUploadInput,
   PresentationSummary,
   PresentationStoreInput,
+  PresentationDemoWorkspace,
+  PresentationDemoWorkspaceId,
 } from '../shared/presentation';
 
 export type {
@@ -17,6 +19,8 @@ export type {
   PresentationImageUploadInput,
   PresentationSummary,
   PresentationStoreInput,
+  PresentationDemoWorkspace,
+  PresentationDemoWorkspaceId,
 } from '../shared/presentation';
 
 export function* listPresentations() {
@@ -34,6 +38,14 @@ export function* loadPresentation(id: string) {
     success: response<PresentationDocument>(),
   }));
   return request as unknown as PresentationDocument;
+}
+
+export function* loadDemoWorkspace(id: PresentationDemoWorkspaceId) {
+  const request = yield* CraftHttpClient.get(() => ({
+    url: `/api/demo-workspaces/${id}`,
+    success: response<PresentationDemoWorkspace>(),
+  }));
+  return request as unknown as PresentationDemoWorkspace;
 }
 
 export function* createPresentation(input: CreatePresentationInput) {

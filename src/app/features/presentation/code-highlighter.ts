@@ -1,6 +1,6 @@
 import type { PresentationCodeLanguage } from '../../../shared/presentation';
 
-type TokenKind = 'plain' | 'keyword' | 'string' | 'number' | 'comment' | 'literal';
+type TokenKind = 'plain' | 'keyword' | 'string' | 'number' | 'comment' | 'literal' | 'property' | 'function' | 'type';
 
 const TOKEN_CLASSES: Record<TokenKind, string> = {
   plain: 'presentation-code__token',
@@ -9,6 +9,9 @@ const TOKEN_CLASSES: Record<TokenKind, string> = {
   number: 'presentation-code__token presentation-code__token--number',
   comment: 'presentation-code__token presentation-code__token--comment',
   literal: 'presentation-code__token presentation-code__token--literal',
+  property: 'presentation-code__token presentation-code__token--property',
+  function: 'presentation-code__token presentation-code__token--function',
+  type: 'presentation-code__token presentation-code__token--type',
 };
 
 const KEYWORDS: Record<PresentationCodeLanguage, ReadonlySet<string>> = {
@@ -18,16 +21,21 @@ const KEYWORDS: Record<PresentationCodeLanguage, ReadonlySet<string>> = {
   json: new Set(),
   css: new Set('from import media supports'.split(' ')),
   bash: new Set('case do done elif else esac fi for function if in then while'.split(' ')),
+  html: new Set(),
+  markdown: new Set(),
 };
 
 const TOKEN_PATTERN = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b/g;
 
-function tokenKind(token: string, language: PresentationCodeLanguage): TokenKind {
+function tokenKind(token: string, language: PresentationCodeLanguage, code: string, start: number): TokenKind {
   if (token.startsWith('//') || token.startsWith('/*') || (token.startsWith('#') && language !== 'css')) return 'comment';
   if (/^["'`]/.test(token)) return 'string';
   if (/^\d/.test(token)) return 'number';
   if (token === 'true' || token === 'false' || token === 'null' || token === 'undefined' || token === 'None') return 'literal';
   if (KEYWORDS[language].has(token)) return 'keyword';
+  if ((language === 'typescript' || language === 'javascript') && /^\s*\??\s*:/.test(code.slice(start + token.length))) return 'property';
+  if ((language === 'typescript' || language === 'javascript') && /^\s*\(/.test(code.slice(start + token.length))) return 'function';
+  if ((language === 'typescript' || language === 'javascript') && /^[A-Z]/.test(token)) return 'type';
   return 'plain';
 }
 
@@ -45,7 +53,7 @@ export function highlightCodeTokens(code: string, language: PresentationCodeLang
     const token = match[0];
     const start = match.index ?? cursor;
     if (start > cursor) tokens.push({ id: id++, text: code.slice(cursor, start), className: TOKEN_CLASSES.plain });
-    tokens.push({ id: id++, text: token, className: TOKEN_CLASSES[tokenKind(token, language)] });
+    tokens.push({ id: id++, text: token, className: TOKEN_CLASSES[tokenKind(token, language, code, start)] });
     cursor = start + token.length;
   }
   if (cursor < code.length) tokens.push({ id: id++, text: code.slice(cursor), className: TOKEN_CLASSES.plain });

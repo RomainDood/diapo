@@ -68,12 +68,14 @@ import type {
   PresentationBackgroundType,
   PresentationThemeId,
   PresentationDecoration,
+  PresentationDemoWorkspaceId,
 } from '../../../shared/presentation';
 import { eventValue } from '../../event-value';
 
 const EMPTY_DOCUMENT: PresentationDocument = {
   id: '',
   layout: 'desktop',
+  demoWorkspaceId: 'none',
   backgroundType: 'theme',
   backgroundTheme: 'aurora',
   backgroundUrl: '',
@@ -146,6 +148,7 @@ function themeLabel(value: PresentationThemeId): string {
   if (value === 'ocean') return i18n.t('ui.editor.theme.ocean');
   if (value === 'forest') return i18n.t('ui.editor.theme.forest');
   if (value === 'paper') return i18n.t('ui.editor.theme.paper');
+  if (value === 'custom') return i18n.t('ui.editor.theme.custom');
   return i18n.t('ui.editor.theme.aurora');
 }
 
@@ -216,6 +219,7 @@ const downloadPresentationExport = craftNodeDirective(
 function toStoreInput(document: PresentationDocument): PresentationStoreInput {
   return {
     layout: document.layout,
+    demoWorkspaceId: document.demoWorkspaceId,
     backgroundType: document.backgroundType,
     backgroundTheme: document.backgroundTheme,
     backgroundUrl: document.backgroundUrl,
@@ -440,6 +444,12 @@ export const EditorPage = craftComponent(
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
+    const updateDemoWorkspace = craftMethod('updateDemoWorkspace', function* (demoWorkspaceId: PresentationDemoWorkspaceId) {
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, demoWorkspaceId };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
     const updateBackgroundType = craftMethod('updateBackgroundType', function* (backgroundType: PresentationBackgroundType) {
       const document = yield* currentDocument();
       const nextDocument = { ...document, backgroundType };
@@ -448,6 +458,12 @@ export const EditorPage = craftComponent(
     });
     const updateBackgroundTheme = craftMethod('updateBackgroundTheme', function* (backgroundTheme: PresentationThemeId) {
       const document = yield* currentDocument();
+      if (backgroundTheme === 'custom') {
+        const nextDocument = { ...document, backgroundTheme };
+        yield* draft.replace(nextDocument);
+        draftChanges.set(toStoreInput(nextDocument));
+        return;
+      }
       const gradient = PRESENTATION_THEME_GRADIENTS[backgroundTheme];
       const nextDocument = { ...document, backgroundTheme, backgroundGradientStart: gradient.start, backgroundGradientMiddle: gradient.middle, backgroundGradientEnd: gradient.end, backgroundGradientAngle: gradient.angle };
       yield* draft.replace(nextDocument);
@@ -455,25 +471,25 @@ export const EditorPage = craftComponent(
     });
     const updateBackgroundGradientStart = craftMethod('updateBackgroundGradientStart', function* (backgroundGradientStart: string) {
       const document = yield* currentDocument();
-      const nextDocument = { ...document, backgroundGradientStart };
+      const nextDocument = { ...document, backgroundTheme: 'custom' as const, backgroundGradientStart };
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
     const updateBackgroundGradientMiddle = craftMethod('updateBackgroundGradientMiddle', function* (backgroundGradientMiddle: string) {
       const document = yield* currentDocument();
-      const nextDocument = { ...document, backgroundGradientMiddle };
+      const nextDocument = { ...document, backgroundTheme: 'custom' as const, backgroundGradientMiddle };
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
     const updateBackgroundGradientEnd = craftMethod('updateBackgroundGradientEnd', function* (backgroundGradientEnd: string) {
       const document = yield* currentDocument();
-      const nextDocument = { ...document, backgroundGradientEnd };
+      const nextDocument = { ...document, backgroundTheme: 'custom' as const, backgroundGradientEnd };
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
     const updateBackgroundGradientAngle = craftMethod('updateBackgroundGradientAngle', function* (backgroundGradientAngle: number) {
       const document = yield* currentDocument();
-      const nextDocument = { ...document, backgroundGradientAngle };
+      const nextDocument = { ...document, backgroundTheme: 'custom' as const, backgroundGradientAngle };
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
@@ -705,6 +721,7 @@ export const EditorPage = craftComponent(
       updateObjective,
       updateCoverImageAlt,
       updateLayout,
+      updateDemoWorkspace,
       updateBackgroundType,
       updateBackgroundTheme,
       updateBackgroundGradientStart,
@@ -731,7 +748,7 @@ export const EditorPage = craftComponent(
       presentationId,
     };
   },
-  ({ presentation, currentDocument, hasDocument, exportFormat, markdownValue, isMarkdownMode, isVisualMode, hasMarkdownErrors, isMarkdownValid, markdownErrorMessage, exportContent, exportFilename, hasCoverImage, hasBackgroundMedia, isThemeBackground, isMediaBackground, isImageBackground, isVideoBackground, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, startMarkdownMode, startVisualMode, updateMarkdown, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateBackgroundType, updateBackgroundTheme, updateBackgroundGradientStart, updateBackgroundGradientMiddle, updateBackgroundGradientEnd, updateBackgroundGradientAngle, updateBackgroundUrl, updateBackgroundDecoration, updateBackgroundDecorationColor, clearImage, updateSection, updateSequence, sectionViews, toggleSection, moveSection, moveSequence, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
+  ({ presentation, currentDocument, hasDocument, exportFormat, markdownValue, isMarkdownMode, isVisualMode, hasMarkdownErrors, isMarkdownValid, markdownErrorMessage, exportContent, exportFilename, hasCoverImage, hasBackgroundMedia, isThemeBackground, isMediaBackground, isImageBackground, isVideoBackground, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, startMarkdownMode, startVisualMode, updateMarkdown, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateDemoWorkspace, updateBackgroundType, updateBackgroundTheme, updateBackgroundGradientStart, updateBackgroundGradientMiddle, updateBackgroundGradientEnd, updateBackgroundGradientAngle, updateBackgroundUrl, updateBackgroundDecoration, updateBackgroundDecorationColor, clearImage, updateSection, updateSequence, sectionViews, toggleSection, moveSection, moveSequence, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
     div({ class: 'editor-shell' }, [
       div({ class: 'editor-toolbar' }, [
           a('backToDashboard', { class: 'studio-link', 'aria-label': i18n.t('ui.editor.backToDashboard'), 'data-navigation': 'external', href: '/feature' }, i18n.t('ui.editor.backToDashboard')),
@@ -783,6 +800,10 @@ export const EditorPage = craftComponent(
         select('presentationLayout', { 'aria-label': i18n.t('ui.editor.layoutLabel'), class: 'editor-layout-select', value: function* () { return (yield* currentDocument()).layout; }, *change(event) { yield* updateLayout(eventValue(event) as PresentationLayout); } }, [
           option({ value: 'desktop' }, i18n.t('ui.editor.layoutDesktop')),
           option({ value: 'vertical' }, i18n.t('ui.editor.layoutVertical')),
+        ]),
+        select('presentationDemoWorkspace', { 'aria-label': i18n.t('ui.editor.demoWorkspaceLabel'), class: 'editor-layout-select', value: function* () { return (yield* currentDocument()).demoWorkspaceId; }, *change(event) { yield* updateDemoWorkspace(eventValue(event) as PresentationDemoWorkspaceId); } }, [
+          option({ value: 'none' }, i18n.t('ui.editor.demoWorkspaceNone')),
+          option({ value: 'angular-route-resources' }, i18n.t('ui.editor.demoWorkspaceAngularRouteResources')),
         ]),
         div({ class: 'editor-background-settings' }, [
           div({ class: 'editor-background-settings__header' }, [

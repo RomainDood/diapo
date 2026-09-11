@@ -220,6 +220,17 @@ test('opens the dedicated presentation stage and advances slides', async ({ page
   await expect(page.getByText('2 / 2')).toBeVisible();
 });
 
+test('highlights route resource code by semantic token', async ({ page }) => {
+  await page.goto('/present/presentation-angular-route-resources');
+  await page.getByRole('button', { name: /Open part/ }).first().click();
+  await page.getByRole('button', { name: 'La navigation attend la donnée', exact: true }).click();
+
+  const code = page.locator('.presentation-code').last();
+  await expect(code.locator('.presentation-code__token--property', { hasText: 'resources' })).toBeVisible();
+  await expect(code.locator('.presentation-code__token--function', { hasText: 'resource' })).toBeVisible();
+  await expect(code.locator('.presentation-code__token--type', { hasText: 'BlockingDemo' })).toBeVisible();
+});
+
 test('lets the presenter move speaker notes on the desktop stage', async ({ page }) => {
   await page.goto('/presenter/presentation-demo');
   await page.getByRole('button', { name: /Open part/ }).first().click();
@@ -300,6 +311,167 @@ test('opens a speaker note link inside the presentation and returns to the same 
   await page.getByRole('button', { name: 'Back to presentation' }).click();
   await expect(page.locator('.presentation-link-viewer')).toHaveCount(0);
   await expect(page.getByText('1 / 2')).toBeVisible();
+});
+
+test('opens the live code workspace from presenter notes', async ({ page }) => {
+  await page.goto('/presenter/presentation-angular-route-resources');
+  await expect(page.locator('.presentation-shell')).toHaveAttribute('data-layout', 'vertical');
+  await page.getByRole('button', { name: /Open part/ }).first().click();
+  await page.getByRole('button', { name: 'Speaker notes' }).click();
+  await page.getByRole('button', { name: 'Code', exact: true }).click();
+
+  await expect(page.getByRole('region', { name: 'Code workspace' })).toBeVisible();
+  const shortcuts = page.getByLabel('Shortcuts', { exact: true });
+  await expect(shortcuts).toHaveCSS('position', 'fixed');
+  await expect(shortcuts).toContainText('Ctrl/Cmd+P');
+  await expect(shortcuts).toContainText('Ctrl/Cmd+Shift+F');
+  await expect(shortcuts).toContainText('Ctrl/Cmd+B');
+  const initialShortcutsPosition = await shortcuts.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return { left: styles.left, top: styles.top };
+  });
+  const shortcutsHandle = page.getByRole('button', { name: 'Move keyboard shortcuts' });
+  const shortcutsHandleBox = await shortcutsHandle.boundingBox();
+  expect(shortcutsHandleBox).not.toBeNull();
+  await page.mouse.move((shortcutsHandleBox?.x ?? 0) + 6, (shortcutsHandleBox?.y ?? 0) + 6);
+  await page.mouse.down();
+  await page.mouse.move(240, 150);
+  await page.mouse.up();
+  const movedShortcutsPosition = await shortcuts.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return { left: styles.left, top: styles.top };
+  });
+  expect(movedShortcutsPosition).not.toEqual(initialShortcutsPosition);
+  const workspaceBody = page.locator('.presentation-code-workspace__body');
+  const workspaceEditor = page.locator('.presentation-code-workspace__editor');
+  const workspaceCode = page.locator('.presentation-code--workspace');
+  await expect(workspaceBody).toHaveAttribute('data-files-visible', 'true');
+  await page.getByRole('button', { name: 'Hide files' }).click();
+  await expect(workspaceBody).toHaveAttribute('data-files-visible', 'false');
+  await expect.poll(async () => workspaceCode.evaluate((element) => {
+    const editor = element.closest('.presentation-code-workspace__editor');
+    if (!editor) return 0;
+    return (element as HTMLElement).getBoundingClientRect().width / editor.getBoundingClientRect().width;
+  })).toBeGreaterThan(0.99);
+  await page.keyboard.press('Control+B');
+  await expect(workspaceBody).toHaveAttribute('data-files-visible', 'true');
+  await page.keyboard.press('Control+B');
+  await expect(workspaceBody).toHaveAttribute('data-files-visible', 'false');
+  await page.getByRole('button', { name: 'Show files' }).click();
+  await expect(workspaceBody).toHaveAttribute('data-files-visible', 'true');
+  await expect(page.getByRole('button', { name: 'src/app/app.routes.ts', exact: true })).toBeVisible();
+  await page.keyboard.press('Control+P');
+  await expect(page.getByRole('dialog', { name: 'Quick open' })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Quick open' }).fill('demo-pages');
+  await page.getByRole('button', { name: 'src/app/demo-pages.ts', exact: true }).last().click();
+  await expect(page.locator('.presentation-code-workspace__tab')).toHaveText('src/app/demo-pages.ts');
+  await page.getByRole('button', { name: 'Back to presentation' }).click();
+  await expect(page.locator('.presentation-code-workspace')).toHaveCount(0);
+  await expect(page.getByText('1 / 8')).toBeVisible();
+});
+
+test('draws temporary annotations on a presentation slide', async ({ page }) => {
+  await page.goto('/presenter/presentation-angular-route-resources');
+  await page.getByRole('button', { name: /Open part/ }).first().click();
+
+  const canvas = page.locator('.presentation-annotation-canvas');
+  const annotationToolbar = page.getByRole('toolbar', { name: 'Presentation annotations' });
+  await expect(canvas).toBeVisible();
+  await expect(annotationToolbar).toHaveCSS('position', 'fixed');
+  await expect(page.getByRole('button', { name: 'Pointer mode' })).toHaveAttribute('title', 'Pointer mode · V');
+  await expect(page.getByRole('button', { name: 'Pen', exact: true })).toHaveAttribute('title', 'Pen · P');
+  await expect(page.getByRole('button', { name: 'Highlighter', exact: true })).toHaveAttribute('title', 'Highlighter · H');
+  await expect(page.getByRole('button', { name: 'Arrow', exact: true })).toHaveAttribute('title', 'Arrow · A');
+  await expect(page.getByRole('button', { name: 'Rectangle', exact: true })).toHaveAttribute('title', 'Rectangle · R');
+  await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveAttribute('title', 'Eraser · E');
+  await expect(page.getByRole('button', { name: 'Undo last annotation' })).toHaveAttribute('title', 'Undo last annotation · Ctrl/Cmd+Z');
+  await expect(page.getByRole('button', { name: 'Clear all annotations' })).toHaveAttribute('title', 'Clear all annotations · Shift+Delete');
+  const penTool = page.getByRole('button', { name: 'Pen', exact: true });
+  await expect(penTool).toHaveAttribute('data-tooltip', 'Pen · P');
+  await penTool.hover();
+  await expect.poll(() => penTool.evaluate((element) => getComputedStyle(element, '::after').visibility)).toBe('visible');
+  const initialToolbarPosition = await annotationToolbar.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return { left: styles.left, top: styles.top };
+  });
+  const toolbarBox = await page.getByRole('button', { name: 'Move annotation toolbar' }).boundingBox();
+  expect(toolbarBox).not.toBeNull();
+  await page.mouse.move((toolbarBox?.x ?? 0) + 2, (toolbarBox?.y ?? 0) + 2);
+  await page.mouse.down();
+  await page.mouse.move(360, 180);
+  await page.mouse.up();
+  const movedToolbarPosition = await annotationToolbar.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return { left: styles.left, top: styles.top };
+  });
+  expect(movedToolbarPosition).not.toEqual(initialToolbarPosition);
+  await page.keyboard.press('P');
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'pen');
+  await expect(canvas).toHaveAttribute('data-annotation-active', 'true');
+
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  await page.mouse.move((canvasBox?.x ?? 0) + 32, (canvasBox?.y ?? 0) + 64);
+  await page.mouse.down();
+  await page.mouse.move((canvasBox?.x ?? 0) + 180, (canvasBox?.y ?? 0) + 120);
+  await page.mouse.up();
+  const paintedPixels = () => canvas.evaluate((element) => {
+    const drawingContext = (element as HTMLCanvasElement).getContext('2d');
+    if (!drawingContext) return 0;
+    const pixels = drawingContext.getImageData(0, 0, (element as HTMLCanvasElement).width, (element as HTMLCanvasElement).height).data;
+    let painted = 0;
+    for (let index = 3; index < pixels.length; index += 4) if (pixels[index] > 0) painted += 1;
+    return painted;
+  });
+  await expect.poll(paintedPixels).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: 'Undo last annotation' })).toBeEnabled();
+
+  await page.keyboard.press('Control+Z');
+  await expect.poll(paintedPixels).toBe(0);
+  await page.keyboard.press('H');
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'highlighter');
+  await page.mouse.move((canvasBox?.x ?? 0) + 40, (canvasBox?.y ?? 0) + 180);
+  await page.mouse.down();
+  await page.mouse.move((canvasBox?.x ?? 0) + 220, (canvasBox?.y ?? 0) + 180);
+  await page.mouse.up();
+  await expect.poll(paintedPixels).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Arrow', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'arrow');
+  await page.mouse.move((canvasBox?.x ?? 0) + 70, (canvasBox?.y ?? 0) + 240);
+  await page.mouse.down();
+  await page.mouse.move((canvasBox?.x ?? 0) + 250, (canvasBox?.y ?? 0) + 285);
+  await page.mouse.up();
+  await expect.poll(paintedPixels).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Rectangle', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'rectangle');
+  await page.mouse.move((canvasBox?.x ?? 0) + 100, (canvasBox?.y ?? 0) + 320);
+  await page.mouse.down();
+  await page.mouse.move((canvasBox?.x ?? 0) + 280, (canvasBox?.y ?? 0) + 390);
+  await page.mouse.up();
+  await expect.poll(paintedPixels).toBeGreaterThan(0);
+  await page.keyboard.press('A');
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'arrow');
+  await page.keyboard.press('R');
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'rectangle');
+  await page.keyboard.press('E');
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'eraser');
+  await page.keyboard.press('V');
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'pointer');
+  await page.keyboard.press('Shift+Delete');
+  await expect.poll(paintedPixels).toBe(0);
+  await expect(canvas).toHaveAttribute('data-annotation-active', 'false');
+});
+
+test('keeps annotation tools connected after changing presentation slide', async ({ page }) => {
+  await page.goto('/presenter/presentation-angular-route-resources');
+  await page.getByRole('button', { name: /Open part/ }).first().click();
+  await page.getByRole('button', { name: 'La navigation attend la donnée', exact: true }).click();
+
+  const canvas = page.locator('.presentation-annotation-canvas');
+  await expect(page.locator('.presentation-stage__title')).toHaveText('La navigation attend la donnée');
+  await page.getByRole('button', { name: 'Pen', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-annotation-tool', 'pen');
+  await expect(canvas).toHaveAttribute('data-annotation-active', 'true');
 });
 
 test('writes a presentation directly in Markdown', async ({ page }) => {

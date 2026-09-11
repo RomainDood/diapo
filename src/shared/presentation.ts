@@ -24,6 +24,8 @@ export const PRESENTATION_CODE_LANGUAGES = [
   'json',
   'css',
   'bash',
+  'html',
+  'markdown',
 ] as const;
 
 export type PresentationCodeLanguage = (typeof PRESENTATION_CODE_LANGUAGES)[number];
@@ -32,11 +34,30 @@ export const PRESENTATION_LAYOUTS = ['desktop', 'vertical'] as const;
 
 export type PresentationLayout = (typeof PRESENTATION_LAYOUTS)[number];
 
+export const PRESENTATION_DEMO_WORKSPACES = [
+  'none',
+  'angular-route-resources',
+] as const;
+
+export type PresentationDemoWorkspaceId = (typeof PRESENTATION_DEMO_WORKSPACES)[number];
+
+export type PresentationDemoWorkspaceFile = {
+  readonly path: string;
+  readonly language: PresentationCodeLanguage;
+  readonly content: string;
+};
+
+export type PresentationDemoWorkspace = {
+  readonly id: PresentationDemoWorkspaceId;
+  readonly title: string;
+  readonly files: readonly PresentationDemoWorkspaceFile[];
+};
+
 export const PRESENTATION_BACKGROUND_TYPES = ['theme', 'image', 'video'] as const;
 
 export type PresentationBackgroundType = (typeof PRESENTATION_BACKGROUND_TYPES)[number];
 
-export const PRESENTATION_THEMES = ['aurora', 'sunset', 'ocean', 'forest', 'paper'] as const;
+export const PRESENTATION_THEMES = ['aurora', 'sunset', 'ocean', 'forest', 'paper', 'custom'] as const;
 
 export type PresentationThemeId = (typeof PRESENTATION_THEMES)[number];
 
@@ -53,6 +74,7 @@ export const PRESENTATION_THEME_GRADIENTS: Record<PresentationThemeId, Presentat
   ocean: { start: '#071d35', middle: '#075985', end: '#087e8b', angle: 135 },
   forest: { start: '#071d18', middle: '#104c43', end: '#176b57', angle: 135 },
   paper: { start: '#3b241d', middle: '#623b2e', end: '#9a5c45', angle: 135 },
+  custom: { start: '#211047', middle: '#3c176b', end: '#8514f5', angle: 135 },
 };
 
 export const PRESENTATION_DECORATIONS = ['orb', 'rings', 'particles', 'grid', 'none'] as const;
@@ -138,6 +160,7 @@ export type PresentationSummary = {
 
 export type PresentationDocument = PresentationSummary & {
   readonly layout: PresentationLayout;
+  readonly demoWorkspaceId: PresentationDemoWorkspaceId;
   readonly backgroundType: PresentationBackgroundType;
   readonly backgroundTheme: PresentationThemeId;
   readonly backgroundUrl: string;
@@ -487,6 +510,7 @@ export type CreatePresentationInput = {
 
 export type PresentationStoreInput = {
   readonly layout: PresentationLayout;
+  readonly demoWorkspaceId: PresentationDemoWorkspaceId;
   readonly backgroundType: PresentationBackgroundType;
   readonly backgroundTheme: PresentationThemeId;
   readonly backgroundUrl: string;
@@ -506,6 +530,7 @@ export type PresentationStoreInput = {
 
 export const DEFAULT_PRESENTATION: PresentationStoreInput = {
   layout: 'desktop',
+  demoWorkspaceId: 'none',
   backgroundType: 'theme',
   backgroundTheme: 'aurora',
   backgroundUrl: '',
