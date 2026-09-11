@@ -9,9 +9,12 @@ const provideHostNameMatchComponent = require('./provide-host-name-match-compone
 const preferCraftHttpTransport = require('./prefer-craft-http-transport.cjs');
 const noCraftServiceComponentSameFile = require('./no-craft-service-component-same-file.cjs');
 const maxCraftDeclarationsPerFile = require('./max-craft-declarations-per-file.cjs');
+const maxCraftComponentLines = require('./max-craft-component-lines.cjs');
 const noRawCssValue = require('./no-raw-css-value.cjs');
 const noRawClass = require('./no-raw-class.cjs');
 const noFreeHas = require('./no-free-has.cjs');
+const preferHoverAxis = require('./prefer-hover-axis.cjs');
+const noUnmodelledTextColor = require('./no-unmodelled-text-color.cjs');
 const styleFileBoundary = require('./style-file-boundary.cjs');
 const preferBrowserBoundaries = require('./prefer-browser-boundaries.cjs');
 const requireComponentMonitoring = require('./require-component-monitoring.cjs');
@@ -29,6 +32,7 @@ const requireCraftComponentForExportedNodeFactory = require('./require-craft-com
 const noRawCraftRouterUrl = require('./no-raw-craft-router-url.cjs');
 const noTypeAssertionsInTemplate = require('./no-type-assertions-in-template.cjs');
 const noExplicitCraftTemplateReturnType = require('./no-explicit-craft-template-return-type.cjs');
+const noExtractedCraftComponentParts = require('./no-extracted-craft-component-parts.cjs');
 const noTypeAssertionsInCraftCode = require('./no-type-assertions-in-craft-code.cjs');
 const noEphemeralTemplateFormState = require('./no-ephemeral-template-form-state.cjs');
 const requireAssertExhaustiveRouteExceptions = require('./require-assert-exhaustive-route-exceptions.cjs');
@@ -42,6 +46,7 @@ const craftComponentNameMatch = require('./craft-component-name-match.cjs');
 const craftDirectiveNameMatch = require('./craft-directive-name-match.cjs');
 const templateElementNameUnique = require('./template-element-name-unique.cjs');
 const preferCraftTemplateBlocks = require('./prefer-craft-template-blocks.cjs');
+const requireCraftComputedForDynamicTemplateLookup = require('./require-craft-computed-for-dynamic-template-lookup.cjs');
 const noImperativeCraftResourceTrigger = require('./no-imperative-craft-resource-trigger.cjs');
 const noImperativeCraftMethodActions = require('./no-imperative-craft-method-actions.cjs');
 const noRemoteWorkInCraftMethod = require('./no-remote-work-in-craft-method.cjs');
@@ -131,9 +136,12 @@ const plugin = {
     'prefer-craft-http-transport': preferCraftHttpTransport,
     'no-craft-service-component-same-file': noCraftServiceComponentSameFile,
     'max-craft-declarations-per-file': maxCraftDeclarationsPerFile,
+    'max-craft-component-lines': maxCraftComponentLines,
     'no-raw-css-value': noRawCssValue,
     'no-raw-class': noRawClass,
     'no-free-has': noFreeHas,
+    'prefer-hover-axis': preferHoverAxis,
+    'no-unmodelled-text-color': noUnmodelledTextColor,
     'style-file-boundary': styleFileBoundary,
     'prefer-browser-boundaries': preferBrowserBoundaries,
     'require-component-monitoring': requireComponentMonitoring,
@@ -153,6 +161,7 @@ const plugin = {
     'no-raw-craft-router-url': noRawCraftRouterUrl,
     'no-type-assertions-in-template': noTypeAssertionsInTemplate,
     'no-explicit-craft-template-return-type': noExplicitCraftTemplateReturnType,
+    'no-extracted-craft-component-parts': noExtractedCraftComponentParts,
     'no-type-assertions-in-craft-code': noTypeAssertionsInCraftCode,
     'no-ephemeral-template-form-state': noEphemeralTemplateFormState,
     'require-assert-exhaustive-route-exceptions':
@@ -167,6 +176,8 @@ const plugin = {
     'craft-directive-name-match': craftDirectiveNameMatch,
     'template-element-name-unique': templateElementNameUnique,
     'prefer-craft-template-blocks': preferCraftTemplateBlocks,
+    'require-craft-computed-for-dynamic-template-lookup':
+      requireCraftComputedForDynamicTemplateLookup,
     'no-imperative-craft-resource-trigger': noImperativeCraftResourceTrigger,
     'no-imperative-craft-method-actions': noImperativeCraftMethodActions,
     'no-remote-work-in-craft-method': noRemoteWorkInCraftMethod,
@@ -302,6 +313,28 @@ plugin.configs = {
     rules: {
       'craft-ts/require-i18n-text': 'error',
       'craft-ts/no-i18n-composition': 'error',
+    },
+  },
+  /**
+   * What the static contrast analysis needs to be able to see.
+   *
+   * Deliberately **not** in `recommended`. `meta.styles` is a supported way
+   * to write a component's CSS, not an escape hatch, and a project that uses
+   * it has made a legitimate choice; failing its build over `color:` would be
+   * this preset telling people their own framework is wrong.
+   *
+   * What the two rules protect is a *claim*. Once a project runs
+   * `style:check`, a `:hover` typed into a string and a `color` set in raw
+   * CSS are invisible to it — so the run comes back clean on styles nobody
+   * proved, which is worse than not running the check at all. Both are
+   * therefore `error` here and absent everywhere else: the preset comes on
+   * with typed CSS, and typed CSS is what makes the claim.
+   */
+  typedCss: {
+    plugins: { 'craft-ts': plugin },
+    rules: {
+      'craft-ts/prefer-hover-axis': 'error',
+      'craft-ts/no-unmodelled-text-color': 'error',
     },
   },
 };

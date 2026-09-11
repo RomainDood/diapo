@@ -329,6 +329,8 @@ describe('createCraftProject', () => {
       'logs:mcp': 'craft-ts-log-mcp',
       'registry:mcp': 'craft-ts-registry-mcp',
     });
+    expect(packageJson.scripts['attest:check']).toBeUndefined();
+    expect(packageJson.devDependencies['@craft-ts/cli']).toBeUndefined();
     expect(packageJson.devDependencies['@craft-ts/log-server']).toBeDefined();
     expect(packageJson.devDependencies['@craft-ts/log-mcp']).toBeDefined();
     expect(
@@ -462,7 +464,7 @@ describe('createCraftProject', () => {
     expect(packageJson.dependencies['@craft-ts/style']).toBeDefined();
     expect(
       packageJson.devDependencies['@craft-ts/style-testing'],
-    ).toBeDefined();
+    ).toBeUndefined();
 
     // Without the plugin the sheet below typechecks and emits nothing at all,
     // which is the failure mode this assertion exists to catch.
@@ -540,6 +542,41 @@ describe('createCraftProject', () => {
       'Read `.claude/skills/craft-ts-project/SKILL.md`',
     );
     expect(skill).toContain('name: craft-ts-project');
+  });
+
+  it('adds a review target to an Nx project and its root package scripts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'craft-ts-create-nx-'));
+    temporaryDirectories.push(root);
+    const result = await createCraftProject({
+      directory: 'apps/starter',
+      rootDir: root,
+      workspace: 'nx',
+      agents: [],
+      i18n: 'none',
+      designSystem: 'basic',
+      typedCss: true,
+      attest: true,
+      force: true,
+    });
+    const packageJson = JSON.parse(
+      await readFile(join(root, 'package.json'), 'utf8'),
+    ) as {
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    const projectJson = JSON.parse(
+      await readFile(join(result.directory, 'project.json'), 'utf8'),
+    ) as {
+      targets: Record<string, { options?: { command?: string } }>;
+    };
+
+    expect(packageJson.scripts['starter:review']).toBe(
+      'npm --prefix apps/starter run review',
+    );
+    expect(packageJson.devDependencies['@craft-ts/cli']).toBeDefined();
+    expect(projectJson.targets.review.options?.command).toBe(
+      'npm run starter:review',
+    );
   });
 
   it('creates an Effect v4 starter with a separate Effect skill and Layer boundary', async () => {
@@ -733,6 +770,43 @@ describe('createCraftProject', () => {
     ).toContain('npm run i18n:check');
   });
 
+  it('generates the typed opt-in attestation workflow only when requested', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'craft-ts-create-attest-'));
+    temporaryDirectories.push(root);
+    const result = await createCraftProject({
+      directory: 'starter',
+      rootDir: root,
+      agents: [],
+      i18n: 'none',
+      typedCss: false,
+      attest: true,
+    });
+    const packageJson = JSON.parse(
+      await readFile(join(result.directory, 'package.json'), 'utf8'),
+    ) as {
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    expect(
+      await readFile(join(result.directory, 'review-attest.config.ts'), 'utf8'),
+    ).toContain('defineReviewAttestConfig');
+    expect(
+      await readFile(join(result.directory, 'e2e/attestation.spec.ts'), 'utf8'),
+    ).toContain('visualAppHappyPaths');
+    expect(packageJson.scripts['attest:capture']).toBeDefined();
+    expect(packageJson.scripts['attest:status']).toContain(
+      '--config review-attest.config.ts',
+    );
+    expect(packageJson.scripts['attest:check']).toContain(
+      'npm run architecture',
+    );
+    expect(packageJson.scripts.review).toContain('npm run attest:review');
+    expect(packageJson.devDependencies['@craft-ts/cli']).toBeDefined();
+    expect(
+      packageJson.devDependencies['@craft-ts/style-testing'],
+    ).toBeDefined();
+  });
+
   it('can generate a domain-first starter without explanatory demo pages', async () => {
     const root = await mkdtemp(join(tmpdir(), 'craft-ts-create-domain-first-'));
     temporaryDirectories.push(root);
@@ -826,6 +900,139 @@ describe('createCraftProject', () => {
       },
     );
     expect(secondOutput).toContain('already in domain-first state');
+  });
+});
+
+/**
+ * What a fresh project gets for free.
+ *
+ * The plan's requirement is that a starter passes the contrast rule with no
+ * manual configuration — which means the generator has to produce a named
+ * palette, at least one hovered component written as an axis, and a
+ * `style:check` that actually proves something. The last one is the reason
+ * these cases exist: the script it replaced checked that `vite.config.ts` was
+ * on disk, so every generated project had a green `style:check` and no
+ * contrast guarantee at all.
+ */
+describe('the contrast guarantee in a generated project', () => {
+  const typedCssStarter = async (workspace: 'standalone' | 'nx', mode: 'plain' | 'effect') => {
+    const root = await mkdtemp(join(tmpdir(), 'craft-ts-contrast-'));
+    temporaryDirectories.push(root);
+    return createCraftProject({
+      directory: workspace === 'nx' ? 'apps/starter' : 'starter',
+      rootDir: root,
+      workspace,
+      mode,
+      agents: [],
+      i18n: 'none',
+      designSystem: 'basic',
+      typedCss: true,
+      force: true,
+    });
+  };
+
+  it.each([
+    ['standalone', 'plain'],
+    ['standalone', 'effect'],
+    ['nx', 'plain'],
+    ['nx', 'effect'],
+  ] as const)('generates a named palette and a hovered axis (%s / %s)', async (
+    workspace,
+    mode,
+  ) => {
+    const result = await typedCssStarter(workspace, mode);
+    const sheet = await readFile(
+      join(result.directory, 'src/app/ui/ui.style.ts'),
+      'utf8',
+    );
+
+    // Named, so a failure can say `ui.accent.dangerHover` rather than a hex.
+    expect(sheet).toContain("definePalette('ui', {");
+    // Hover as an axis, not a selector: the point lands in the class contract
+    // and the analysis measures the colours it writes.
+    expect(sheet).toContain('when(interaction.hover');
+    expect(sheet).not.toContain(':hover');
+    // And the axis is inside a declared budget, so its cost was a decision.
+    expect(sheet).toContain('{ axes: [tone, interaction] }');
+  });
+
+  it('runs a real analysis under style:check, not a file-existence test', async () => {
+    const result = await typedCssStarter('standalone', 'plain');
+    const script = await readFile(
+      join(result.directory, 'scripts/style-check.mjs'),
+      'utf8',
+    );
+
+    // Build first — the dump only exists because the plugin evaluated the
+    // sheets — then analyse the dump together with the program.
+    expect(script).toContain("'vite', 'build'");
+    expect(script).toContain('--style-contrast');
+    expect(script).toContain('.craft/style-graph.json');
+    // Indeterminates are not waved through: the flag that would do it is
+    // absent, and its absence is the default.
+    expect(script).not.toContain('--allow-indeterminate');
+    // The check it replaced.
+    expect(script).not.toContain('Typed CSS configuration present');
+  });
+
+  it('switches on the typedCss lint preset, and only with typed CSS', async () => {
+    const withTypedCss = await typedCssStarter('standalone', 'plain');
+    expect(
+      await readFile(join(withTypedCss.directory, 'eslint.config.mjs'), 'utf8'),
+    ).toContain('craftRules.configs.typedCss.rules');
+
+    const root = await mkdtemp(join(tmpdir(), 'craft-ts-plain-css-'));
+    temporaryDirectories.push(root);
+    const plainCss = await createCraftProject({
+      directory: 'starter',
+      rootDir: root,
+      agents: [],
+      i18n: 'none',
+      typedCss: false,
+      force: true,
+    });
+    // A plain-CSS project writes its colours in raw CSS by design and makes
+    // no contrast claim, so the rules that protect that claim stay off.
+    expect(
+      await readFile(join(plainCss.directory, 'eslint.config.mjs'), 'utf8'),
+    ).not.toContain('typedCss');
+  });
+
+  it('writes the dump where style:check looks for it', async () => {
+    const result = await typedCssStarter('standalone', 'plain');
+    expect(
+      await readFile(join(result.directory, 'vite.config.ts'), 'utf8'),
+    ).toContain("dumpPath: '.craft/style-graph.json'");
+  });
+
+  it('puts style:check in the generated CI', async () => {
+    const result = await typedCssStarter('standalone', 'plain');
+    expect(
+      await readFile(
+        join(result.directory, '.github/workflows/ci.yml'),
+        'utf8',
+      ),
+    ).toContain('npm run style:check');
+  });
+
+  it('leaves a project without typed CSS alone', async () => {
+    // The guarantee is conditioned on `typedCss: true`. A plain-CSS project
+    // has no dump and nothing to analyse, and generating a script that would
+    // fail is worse than generating none.
+    const root = await mkdtemp(join(tmpdir(), 'craft-ts-contrast-off-'));
+    temporaryDirectories.push(root);
+    const result = await createCraftProject({
+      directory: 'starter',
+      rootDir: root,
+      agents: [],
+      i18n: 'none',
+      typedCss: false,
+      force: true,
+    });
+    const packageJson = JSON.parse(
+      await readFile(join(result.directory, 'package.json'), 'utf8'),
+    ) as { scripts: Record<string, string> };
+    expect(packageJson.scripts['style:check']).toBeUndefined();
   });
 });
 

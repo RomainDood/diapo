@@ -1,0 +1,68 @@
+{
+  "name": "craft-ts-style-testing",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/review-attestation/src",
+  "prefix": "craft",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/review-attestation",
+        "main": "libs/review-attestation/src/index.ts",
+        "tsConfig": "libs/review-attestation/tsconfig.lib.json",
+        "assets": [
+          {
+            "input": "libs/review-attestation/attestation-app",
+            "glob": "index.html",
+            "output": "attestation-app"
+          },
+          {
+            "input": "libs/review-attestation/attestation-app/src",
+            "glob": "**/*",
+            "output": "attestation-app/src"
+          }
+        ]
+      }
+    },
+    "nx-release-publish": {
+      "options": {
+        "packageRoot": "dist/{projectRoot}"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/run-lib-vitest.mjs libs/review-attestation/vitest.config.mts",
+        "forwardAllArgs": true
+      }
+    },
+    "typecheck-spec": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p libs/review-attestation/tsconfig.spec.json --noEmit --pretty false"
+      },
+      "inputs": [
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.spec.json",
+        "{projectRoot}/src/**/*.ts"
+      ],
+      "cache": true
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": {
+        "maxWarnings": -1
+      }
+    },
+    "e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx playwright test --config libs/review-attestation/playwright.config.ts",
+        "forwardAllArgs": true
+      }
+    }
+  }
+}

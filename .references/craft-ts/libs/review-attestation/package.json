@@ -1,0 +1,63 @@
+{
+  "name": "@craft-ts/style-testing",
+  "version": "0.8.3",
+  "description": "Visual scenario matrix and drivers for @craft-ts/style",
+  "author": "Romain Geffrault",
+  "license": "MIT",
+  "homepage": "https://craft-ts.github.io/craft/",
+  "bugs": {
+    "url": "https://github.com/craft-ts/craft-ts/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/craft-ts/craft-ts.git"
+  },
+  "peerDependencies": {
+    "@craft-ts/component": "^0.8.3",
+    "@craft-ts/core": "^0.8.3",
+    "@craft-ts/style": "^0.8.3",
+    "@craft-ts/dev-tools": "^0.8.3",
+    "tslib": "^2.3.0",
+    "vite": "^8.2.2"
+  },
+  "peerDependenciesMeta": {
+    "@craft-ts/component": {
+      "optional": true
+    },
+    "@craft-ts/core": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./review": {
+      "types": "./src/lib/review/index.d.ts",
+      "default": "./src/lib/review/index.js"
+    },
+    "./review/frame": {
+      "types": "./src/lib/review/frame.d.ts",
+      "default": "./src/lib/review/frame.js"
+    },
+    "./review-attest": {
+      "types": "./src/lib/review-attest.d.ts",
+      "default": "./src/lib/review-attest.js"
+    }
+  }
+}

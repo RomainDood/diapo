@@ -44,6 +44,17 @@ export interface DependencyGraphNodeRegistry {
   'http-endpoint': Record<string, unknown>;
   unique: Record<string, unknown>;
   'template-element': Record<string, unknown>;
+  /**
+   * One hyperscript call, whatever it renders.
+   *
+   * Distinct from `template-element`, which is the *interactive* subset and
+   * whose identity a11y rules and the attestation tooling already depend on.
+   * Widening that kind to every `div` would change what those consumers see;
+   * a second kind alongside it changes nothing for them, and gives the
+   * contrast solver the element-by-element hierarchy it needs — a text node's
+   * colour and the background it sits on are almost never on the same element.
+   */
+  'styled-element': Record<string, unknown>;
   'server-function-family': Record<string, unknown>;
   'server-function-contract': Record<string, unknown>;
   'server-function-client': Record<string, unknown>;
@@ -66,6 +77,8 @@ export type DependencyGraphNodeFor<
   label: string;
   filePath?: string;
   line?: number;
+  endLine?: number;
+  sourceHash?: string;
   details?: DependencyGraphNodeRegistry[K];
 };
 
@@ -87,6 +100,14 @@ export interface DependencyGraphEdgeRegistry {
   writes: Record<string, unknown>;
   subscribes: Record<string, unknown>;
   triggers: Record<string, unknown>;
+  /**
+   * Element → the sheet class it carries.
+   *
+   * Declared here rather than in `style-graph.ts` because the AST producer is
+   * what discovers it, and a module augmentation written in the style module
+   * is not visible to this one.
+   */
+  'styled-by': Record<string, unknown>;
 }
 
 export type DependencyGraphEdgeKind = keyof DependencyGraphEdgeRegistry;
@@ -128,6 +149,17 @@ export type DependencyGraphNode = {
   label: string;
   filePath?: string;
   line?: number;
+  /** Last line of the declaration this node stands for. Metadata, never hashed. */
+  endLine?: number;
+  /**
+   * Hash of the node's own source range.
+   *
+   * Its own range, not the file's: a slice that does not contain a node must
+   * not see its fingerprint move when that node is edited. That is the whole
+   * property `code-slice.ts` sells, and it cannot be recovered downstream from
+   * a line number alone.
+   */
+  sourceHash?: string;
   details?: Record<string, unknown>;
 };
 
@@ -449,6 +481,7 @@ export function analyzeDependencyGraph(
   analyzeServiceBodies(builder);
   analyzeComponents(builder);
   collectInteractiveTemplateElements(builder);
+  collectStyledElements(builder);
   analyzeRoutes(builder);
   analyzeInsertions(builder);
   collectCraftUniques(builder, sourceFiles);
@@ -1193,20 +1226,24 @@ function collectServices(
         getStringProperty(config, 'name') ??
         inferNameFromServiceDeclaration(call);
       if (!name) continue;
-      const node = addNode(builder, {
-        id: `service:${sourceFile.getFilePath()}:${name}`,
-        kind: 'service',
-        label: name,
-        filePath: sourceFile.getFilePath(),
-        line: call.getStartLineNumber(),
-        details: {
-          scope: getStringProperty(config, 'scope'),
-          appStart: getBooleanProperty(config, 'appStart') === true,
-          browserBoundary:
-            getBooleanProperty(config, 'browserBoundary') === true,
-          outputProperties: [],
+      const node = addNode(
+        builder,
+        {
+          id: `service:${sourceFile.getFilePath()}:${name}`,
+          kind: 'service',
+          label: name,
+          filePath: sourceFile.getFilePath(),
+          line: call.getStartLineNumber(),
+          details: {
+            scope: getStringProperty(config, 'scope'),
+            appStart: getBooleanProperty(config, 'appStart') === true,
+            browserBoundary:
+              getBooleanProperty(config, 'browserBoundary') === true,
+            outputProperties: [],
+          },
         },
-      });
+        call,
+      );
       const service: ServiceInfo = {
         node,
         helpers: new Set(),
@@ -1265,14 +1302,18 @@ function collectSources(
       );
       if (declaration)
         addBindingNames(declaration.getNameNode(), variableNames);
-      const node = addNode(builder, {
-        id: `source:${sourceFile.getFilePath()}:${name}:${call.getStartLineNumber()}`,
-        kind: 'source',
-        label: `${name} (${creator})`,
-        filePath: sourceFile.getFilePath(),
-        line: call.getStartLineNumber(),
-        details: { creator },
-      });
+      const node = addNode(
+        builder,
+        {
+          id: stableNodeId('source', 'source', call),
+          kind: 'source',
+          label: `${name} (${creator})`,
+          filePath: sourceFile.getFilePath(),
+          line: call.getStartLineNumber(),
+          details: { creator },
+        },
+        call,
+      );
       builder.sources.push({ node, variableNames, call });
     }
   }
@@ -1302,17 +1343,24 @@ function collectComponents(
     )) {
       if (call.getExpression().getText() !== 'craftComponent') continue;
       const explicitLabel = getStringArgument(call, 0);
+      // An anonymous component used to be named after its line, which renamed
+      // it on every edit above it. The owner path plus an ordinal names the
+      // same component for as long as its declaration keeps its name.
       const label =
-        explicitLabel ?? `AnonymousComponent@${call.getStartLineNumber()}`;
+        explicitLabel ?? `AnonymousComponent@${anonymousComponentSuffix(call)}`;
       const component: ComponentInfo = {
-        node: addNode(builder, {
-          id: `component:${sourceFile.getFilePath()}:${label}`,
-          kind: 'component',
-          label,
-          filePath: sourceFile.getFilePath(),
-          line: call.getStartLineNumber(),
-          ...(explicitLabel ? {} : { details: { anonymous: true } }),
-        }),
+        node: addNode(
+          builder,
+          {
+            id: `component:${sourceFile.getFilePath()}:${label}`,
+            kind: 'component',
+            label,
+            filePath: sourceFile.getFilePath(),
+            line: call.getStartLineNumber(),
+            ...(explicitLabel ? {} : { details: { anonymous: true } }),
+          },
+          call,
+        ),
         call,
         bindings: new Map(),
       };
@@ -1369,23 +1417,29 @@ function collectRoutes(
           '<dynamic>';
         const label = `${collectionName}:${path}`;
         const route: RouteInfo = {
-          node: addNode(builder, {
-            id: `route:${sourceFile.getFilePath()}:${label}`,
-            kind: 'route',
-            label,
-            filePath: sourceFile.getFilePath(),
-            line: object.getStartLineNumber(),
-            details: {
-              collection: collectionName,
-              path,
-              routesName,
-              hasComponent: routeHasTargetComponent(object),
-              hasPendingComponent: Boolean(
-                object.getProperty('pendingComponent'),
-              ),
-              hasErrorComponent: Boolean(object.getProperty('errorComponent')),
+          node: addNode(
+            builder,
+            {
+              id: `route:${sourceFile.getFilePath()}:${label}`,
+              kind: 'route',
+              label,
+              filePath: sourceFile.getFilePath(),
+              line: object.getStartLineNumber(),
+              details: {
+                collection: collectionName,
+                path,
+                routesName,
+                hasComponent: routeHasTargetComponent(object),
+                hasPendingComponent: Boolean(
+                  object.getProperty('pendingComponent'),
+                ),
+                hasErrorComponent: Boolean(
+                  object.getProperty('errorComponent'),
+                ),
+              },
             },
-          }),
+            object,
+          ),
           sourceFile,
           object,
           routesName,
@@ -1640,12 +1694,17 @@ function collectRouteChecks(builder: GraphBuilder): void {
         continue;
       }
       const targetName = call.getArguments()[0]?.getText();
+      const key = stableFamilyKey('route-check', call);
       const assertNode = addRouteCheckNode(
         builder,
         sourceFile,
-        `assertExhaustiveRouteExceptions:${targetName ?? call.getStartLineNumber()}`,
+        `assertExhaustiveRouteExceptions:${
+          targetName ??
+          `${key}/${key === undefined ? 0 : stableOrdinal('route-check', call, key)}`
+        }`,
         'assertExhaustiveRouteExceptions',
         call.getStartLineNumber(),
+        call,
       );
       for (const route of routes) {
         if (!targetName || route.routesName === targetName) {
@@ -1664,15 +1723,20 @@ function addRouteCheckNode(
   name: string,
   mechanism: RouteCheckMechanism,
   line: number,
+  source?: Node,
 ): DependencyGraphNode {
-  return addNode(builder, {
-    id: `route-check:${sourceFile.getFilePath()}:${name}`,
-    kind: 'route-check',
-    label: `${mechanism} ${name}`,
-    filePath: sourceFile.getFilePath(),
-    line,
-    details: { mechanism, name },
-  });
+  return addNode(
+    builder,
+    {
+      id: `route-check:${sourceFile.getFilePath()}:${name}`,
+      kind: 'route-check',
+      label: `${mechanism} ${name}`,
+      filePath: sourceFile.getFilePath(),
+      line,
+      details: { mechanism, name },
+    },
+    source,
+  );
 }
 
 function resolveRouteCheck(
@@ -1874,7 +1938,9 @@ function analyzeComponents(builder: GraphBuilder): void {
     const call = component.call;
     const setup = call.getArguments()[2];
     const template = call.getArguments()[3];
-    for (const part of [setup, template]) {
+    for (const part of [setup, template].flatMap(
+      componentImplementationParts,
+    )) {
       if (!part) continue;
       collectServiceBindingsFromReturns(component, part, builder);
       for (const nested of part.getDescendantsOfKind(
@@ -1931,22 +1997,87 @@ function analyzeComponents(builder: GraphBuilder): void {
       }
       addSourceInteractions(builder, component.node.id, part);
     }
-    const setupBindings = setup
-      ? collectReactiveBindings(builder, setup, component.node.id, component)
-      : new Map<string, ReactiveBinding>();
-    if (setup) {
+    const setupParts = componentImplementationParts(setup);
+    const setupBindings = new Map<string, ReactiveBinding>();
+    for (const setupPart of setupParts) {
+      for (const [name, binding] of collectReactiveBindings(
+        builder,
+        setupPart,
+        component.node.id,
+        component,
+      )) {
+        setupBindings.set(name, binding);
+      }
       analyzeReactiveDependencies(
         builder,
-        setup,
+        setupPart,
         setupBindings,
         component.node.id,
       );
     }
-    if (template) {
-      analyzeTemplateDependencies(builder, component, template, setupBindings);
+    for (const templatePart of templateImplementationParts(template)) {
+      analyzeTemplateDependencies(
+        builder,
+        component,
+        templatePart,
+        setupBindings,
+      );
     }
     collectServicePropertyUses(builder, component);
   }
+}
+
+/**
+ * A craftComponent may keep its setup/template beside the declaration as a
+ * named function. Walking only the identifier makes the graph miss every
+ * primitive and HTTP call in that implementation, so resolve local symbols
+ * before collecting the component body.
+ */
+function componentImplementationParts(part: Node | undefined): Node[] {
+  if (!part) return [];
+  const identifier = part.asKind(SyntaxKind.Identifier);
+  if (!identifier) return [part];
+  const symbol = identifier.getSymbol();
+  const resolved = symbol?.getAliasedSymbol() ?? symbol;
+  const declarations = (resolved?.getDeclarations() ?? []).filter(
+    (declaration) => !declaration.getSourceFile().isDeclarationFile(),
+  );
+  return declarations.length > 0 ? declarations : [part];
+}
+
+/**
+ * Resolves the callable body of a component template. Templates are commonly
+ * kept in a named `craftTemplate` constant so they can be reused or tested;
+ * the graph still needs the function node to resolve its context bindings and
+ * its reactive expressions.
+ */
+function templateImplementationParts(part: Node | undefined): Node[] {
+  const resolve = (node: Node, seen: Set<Node>): Node[] => {
+    if (seen.has(node)) return [];
+    seen.add(node);
+    if (isFunctionNode(node)) return [node];
+    if (Node.isVariableDeclaration(node)) {
+      const initializer = node.getInitializer();
+      return initializer ? resolve(initializer, seen) : [];
+    }
+    if (
+      Node.isCallExpression(node) &&
+      node.getExpression().getText() === 'craftTemplate'
+    ) {
+      const template = node.getArguments()[0];
+      return template ? resolve(template, seen) : [];
+    }
+    if (Node.isIdentifier(node)) {
+      return componentImplementationParts(node).flatMap((declaration) =>
+        resolve(declaration, seen),
+      );
+    }
+    return [];
+  };
+
+  return (part ? componentImplementationParts(part) : []).flatMap((node) =>
+    resolve(node, new Set()),
+  );
 }
 
 const NAMED_HTML_HELPERS = new Set([
@@ -2017,49 +2148,65 @@ const INTERACTIVE_ELEMENT_HANDLERS = new Set([
   'onSubmit',
 ]);
 
-type ParsedHyperscript = {
+export type ParsedHyperscript = {
   tag: string;
   name?: string;
   nameKind: 'literal' | 'non-static' | 'missing';
   props?: ObjectLiteralExpression;
+  /**
+   * Index of the first child argument.
+   *
+   * The helpers have four call shapes and the children start at a different
+   * place in each. Computing it once, here, is what lets the contrast pass ask
+   * "can this element hold text?" without re-deriving the shape and getting it
+   * wrong for one of the four.
+   */
+  childrenStart: number;
 };
 
 function collectInteractiveTemplateElements(builder: GraphBuilder): void {
   for (const component of builder.components) {
     const template = component.call.getArguments()[3];
-    if (!template) continue;
-    walkTemplate(template, (node) => {
+    for (const templatePart of templateImplementationParts(template))
+      walkTemplate(templatePart, (node) => {
       if (!Node.isCallExpression(node)) return;
       if (node.getExpression().getText() === 'craftComponent') return 'skip';
       const parsed = parseCraftHyperscript(node);
       if (!parsed || !isInteractiveElement(parsed)) return undefined;
       const filePath = node.getSourceFile().getFilePath();
-      const element = addNode(builder, {
-        id: `template-element:${filePath}:${node.getStartLineNumber()}:${node.getStart()}`,
-        kind: 'template-element',
-        label: parsed.name ?? '(unnamed)',
-        filePath,
-        line: node.getStartLineNumber(),
-        details: {
-          tag: parsed.tag,
-          localName: parsed.name,
-          static: parsed.nameKind !== 'non-static',
-          missing: parsed.nameKind === 'missing',
-          component: component.node.label,
+      const element = addNode(
+        builder,
+        {
+          id: stableNodeId('template-element', 'template-element', node),
+          kind: 'template-element',
+          label: parsed.name ?? '(unnamed)',
+          filePath,
+          line: node.getStartLineNumber(),
+          details: {
+            tag: parsed.tag,
+            localName: parsed.name,
+            static: parsed.nameKind !== 'non-static',
+            missing: parsed.nameKind === 'missing',
+            component: component.node.label,
+          },
         },
-      });
+        node,
+      );
       addEdge(builder, component.node.id, element.id, 'contains', 'ast');
       return undefined;
-    });
+      });
   }
 }
 
-function walkTemplate(node: Node, visit: (node: Node) => 'skip' | void): void {
+export function walkTemplate(
+  node: Node,
+  visit: (node: Node) => 'skip' | void,
+): void {
   if (visit(node) === 'skip') return;
   node.forEachChild((child) => walkTemplate(child, visit));
 }
 
-function parseCraftHyperscript(
+export function parseCraftHyperscript(
   call: CallExpression,
 ): ParsedHyperscript | undefined {
   const callee = call.getExpression().getText();
@@ -2071,6 +2218,7 @@ function parseCraftHyperscript(
       tag,
       nameKind: 'missing',
       props: args[1]?.asKind(SyntaxKind.ObjectLiteralExpression),
+      childrenStart: 2,
     };
   }
   if (!NAMED_HTML_HELPERS.has(callee)) return undefined;
@@ -2086,10 +2234,11 @@ function parseCraftHyperscript(
       name: first.asKind(SyntaxKind.StringLiteral)?.getLiteralValue(),
       nameKind: 'literal',
       props: second.asKind(SyntaxKind.ObjectLiteralExpression),
+      childrenStart: 2,
     };
   }
   if (first && Node.isObjectLiteralExpression(first)) {
-    return { tag: callee, nameKind: 'missing', props: first };
+    return { tag: callee, nameKind: 'missing', props: first, childrenStart: 1 };
   }
   if (
     first &&
@@ -2101,12 +2250,13 @@ function parseCraftHyperscript(
       tag: callee,
       nameKind: 'non-static',
       props: second?.asKind(SyntaxKind.ObjectLiteralExpression),
+      childrenStart: 2,
     };
   }
-  return { tag: callee, nameKind: 'missing' };
+  return { tag: callee, nameKind: 'missing', childrenStart: 0 };
 }
 
-function isInteractiveElement(parsed: ParsedHyperscript): boolean {
+export function isInteractiveElement(parsed: ParsedHyperscript): boolean {
   if (
     parsed.tag === 'input' &&
     getStringProperty(parsed.props, 'type') === 'hidden'
@@ -2126,6 +2276,350 @@ function hasInteractiveHandler(
   );
 }
 
+
+// ─── styled elements ────────────────────────────────────────────────────────
+//
+// The contrast proof needs a finer grain than "this component uses these
+// sheets". Text takes its colour from the element that carries it or from an
+// ancestor that set `color`; the background behind it is almost always painted
+// two or three levels up. A component-to-class relation cannot express either,
+// so this pass records one node per hyperscript call, the parent link between
+// them, and the class each one carries.
+//
+// It is deliberately separate from `collectInteractiveTemplateElements`: that
+// pass records the *interactive* subset under the `template-element` kind, and
+// a11y rules, the attestation tooling and the existing graph snapshots all key
+// on those ids. Widening it would move ids that other things depend on.
+
+/** Helpers whose call is a template block rather than an element. */
+const TEMPLATE_BLOCK_HELPERS = new Set([
+  'ifNode',
+  'forNode',
+  'matchNode',
+  'deferNode',
+  'content',
+  'craftTemplate',
+  'renderTemplate',
+  'renderContent',
+]);
+
+/**
+ * What the graph knows about the text an element can hold.
+ *
+ * `none` is a real answer and not a missing one: an element with only element
+ * children has no text of its own, and checking its `color` against its
+ * background would report a failure nobody can see.
+ */
+export type ElementTextKind = 'none' | 'static' | 'dynamic';
+
+type BranchSegment = {
+  /** `if:isOpen` — the decision. Two segments with the same key exclude. */
+  readonly key: string;
+  readonly side: string;
+};
+
+type StyleClassResolution =
+  | { readonly kind: 'resolved'; readonly keys: readonly string[] }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unresolved'; readonly detail: string };
+
+/**
+ * `button.root` → `dsButton-root`.
+ *
+ * Follows the identifier back to its `craftStyles(prefix, …)` declaration and
+ * joins the prefix with the property name, which is exactly the key the sheet
+ * registered. The alternative — matching the emitted class string against the
+ * dump — cannot work here: the AST sees `button.root`, never the atoms.
+ */
+function craftStylesPrefix(identifier: Node): string | undefined {
+  if (!Node.isIdentifier(identifier)) return undefined;
+  const symbol = identifier.getSymbol();
+  const resolved = symbol?.getAliasedSymbol() ?? symbol;
+  for (const declaration of resolved?.getDeclarations() ?? []) {
+    const initializer = Node.isVariableDeclaration(declaration)
+      ? declaration.getInitializer()
+      : undefined;
+    if (!initializer || !Node.isCallExpression(initializer)) continue;
+    if (initializer.getExpression().getText() !== 'craftStyles') continue;
+    const prefix = initializer
+      .getArguments()[0]
+      ?.asKind(SyntaxKind.StringLiteral)
+      ?.getLiteralValue();
+    if (prefix) return prefix;
+  }
+  return undefined;
+}
+
+function resolveStyleClasses(expression: Node | undefined): StyleClassResolution {
+  if (!expression) return { kind: 'absent' };
+  if (Node.isArrayLiteralExpression(expression)) {
+    const parts = expression.getElements().map(resolveStyleClasses);
+    const unresolved = parts.find((part) => part.kind === 'unresolved');
+    if (unresolved) return unresolved;
+    return {
+      kind: 'resolved',
+      keys: parts.flatMap((part) => (part.kind === 'resolved' ? part.keys : [])),
+    };
+  }
+  if (Node.isPropertyAccessExpression(expression)) {
+    const prefix = craftStylesPrefix(expression.getExpression());
+    if (!prefix) {
+      return {
+        kind: 'unresolved',
+        detail: `${quoted(expression)} does not resolve to a craftStyles(...) sheet, so the class it sets cannot be joined to the style dump.`,
+      };
+    }
+    return { kind: 'resolved', keys: [`${prefix}-${expression.getName()}`] };
+  }
+  return {
+    kind: 'unresolved',
+    detail: `${quoted(expression)} is not a constant sheet class. The contrast solver reads the styles of a class it can name; a computed class names none.`,
+  };
+}
+
+/**
+ * Source text for a message: one line, and quoted at most once.
+ *
+ * A class expression can be a multi-line arrow, and a string literal already
+ * carries its own quotes — `''craft-ai-cancel''` in a diagnostic reads as a
+ * bug in the tool rather than as a quotation.
+ */
+function quoted(expression: Node): string {
+  const text = expression.getText().replace(/\s+/g, ' ').trim();
+  const clipped = text.length > 120 ? `${text.slice(0, 117)}...` : text;
+  return /^['"`]/.test(clipped) ? clipped : `'${clipped}'`;
+}
+
+/** The `class` prop's initializer, whatever spelling it uses. */
+function classExpression(
+  props: ObjectLiteralExpression | undefined,
+): Node | undefined {
+  return props
+    ?.getProperty('class')
+    ?.asKind(SyntaxKind.PropertyAssignment)
+    ?.getInitializer();
+}
+
+const isTextLiteral = (node: Node): boolean =>
+  Node.isStringLiteral(node) ||
+  Node.isNoSubstitutionTemplateLiteral(node) ||
+  Node.isTemplateExpression(node) ||
+  Node.isNumericLiteral(node);
+
+/**
+ * Whether this element can end up with text in it, and of which kind.
+ *
+ * A child that is another hyperscript call is structure, not text. Anything
+ * else in child position — an identifier bound to a signal, a call, a
+ * conditional — can render as a string, so it counts as `dynamic`. Erring
+ * towards "can hold text" is the safe direction: the cost is a contrast check
+ * on an element that turns out to be empty, and the cost of the other
+ * direction is silence about text that fails.
+ */
+function textKindOf(call: CallExpression, childrenStart: number): ElementTextKind {
+  let kind: ElementTextKind = 'none';
+  for (const child of call.getArguments().slice(childrenStart)) {
+    if (isTextLiteral(child)) return 'static';
+    if (Node.isCallExpression(child)) {
+      const callee = child.getExpression().getText();
+      if (parseCraftHyperscript(child) || TEMPLATE_BLOCK_HELPERS.has(callee)) {
+        continue;
+      }
+    }
+    if (Node.isArrayLiteralExpression(child)) continue;
+    kind = 'dynamic';
+  }
+  return kind;
+}
+
+/**
+ * The branch an element sits in, as a path of exclusive decisions.
+ *
+ * Only `ifNode` contributes: its two arms are mutually exclusive by
+ * construction, which is the one exclusivity the graph can prove rather than
+ * assume. `forNode` and `matchNode` bodies are walked, and contribute nothing
+ * — a repeated element is co-present with itself, and a match arm's
+ * exclusivity depends on the discriminant, which is not read here.
+ */
+function branchSegmentFor(
+  call: CallExpression,
+  argument: Node,
+): BranchSegment | undefined {
+  if (call.getExpression().getText() !== 'ifNode') return undefined;
+  const args = call.getArguments();
+  const condition = args[0]?.getText() ?? '?';
+  if (args[1] === argument) return { key: `if:${condition}`, side: 'true' };
+  if (args[2] === argument) return { key: `if:${condition}`, side: 'false' };
+  return undefined;
+}
+
+const branchPathText = (path: readonly BranchSegment[]): string =>
+  path.map((segment) => `${segment.key}=${segment.side}`).join('+');
+
+/**
+ * One node per hyperscript call, plus the tree between them.
+ *
+ * The walk is explicit rather than a `walkTemplate` visit because the parent
+ * of an element is the enclosing *element*, not the enclosing AST node: a
+ * `div` inside `ifNode(c, () => span(...))` is a child of nothing in the AST
+ * sense and a child of the `div` above the `ifNode` in the render sense.
+ */
+function collectStyledElements(builder: GraphBuilder): void {
+  for (const component of builder.components) {
+    const template = component.call.getArguments()[3];
+    for (const part of templateImplementationParts(template)) {
+      walkStyledElements(builder, component, part, undefined, [], 0);
+    }
+  }
+}
+
+function walkStyledElements(
+  builder: GraphBuilder,
+  component: ComponentInfo,
+  node: Node,
+  parentId: string | undefined,
+  branch: readonly BranchSegment[],
+  depth: number,
+): void {
+  const descend = (
+    child: Node,
+    nextParent: string | undefined,
+    nextBranch: readonly BranchSegment[],
+    nextDepth: number,
+  ) => walkStyledElements(builder, component, child, nextParent, nextBranch, nextDepth);
+
+  if (Node.isCallExpression(node)) {
+    const callee = node.getExpression().getText();
+    if (callee === 'craftComponent') return;
+
+    const child = findComponentForCall(builder, node);
+    if (child && child !== component) {
+      // Where a child component is rendered, so a component whose text
+      // inherits its colour can be judged once per surface it appears on
+      // rather than once in the abstract.
+      if (parentId) {
+        addEdge(builder, parentId, child.node.id, 'renders', 'ast');
+      }
+      for (const argument of node.getArguments()) {
+        descend(argument, parentId, branch, depth);
+      }
+      return;
+    }
+
+    const parsed = parseCraftHyperscript(node);
+    if (parsed) {
+      const element = addStyledElementNode(
+        builder,
+        component,
+        node,
+        parsed,
+        branch,
+        depth,
+      );
+      if (parentId) {
+        addEdge(builder, parentId, element.id, 'contains', 'ast');
+      } else {
+        addEdge(builder, component.node.id, element.id, 'contains', 'ast');
+      }
+      for (const argument of node.getArguments()) {
+        descend(argument, element.id, branch, depth + 1);
+      }
+      return;
+    }
+
+    if (TEMPLATE_BLOCK_HELPERS.has(callee)) {
+      for (const argument of node.getArguments()) {
+        const segment = branchSegmentFor(node, argument);
+        descend(
+          argument,
+          parentId,
+          segment ? [...branch, segment] : branch,
+          depth,
+        );
+      }
+      return;
+    }
+  }
+
+  node.forEachChild((child) => descend(child, parentId, branch, depth));
+}
+
+function addStyledElementNode(
+  builder: GraphBuilder,
+  component: ComponentInfo,
+  call: CallExpression,
+  parsed: ParsedHyperscript,
+  branch: readonly BranchSegment[],
+  depth: number,
+): DependencyGraphNode {
+  const classes = resolveStyleClasses(classExpression(parsed.props));
+  const textKind = textKindOf(call, parsed.childrenStart);
+  const filePath = call.getSourceFile().getFilePath();
+  const label = parsed.name
+    ? `${parsed.tag}.${parsed.name}`
+    : `${parsed.tag}`;
+
+  const element = addNode(
+    builder,
+    {
+      id: stableNodeId('styled-element', 'styled-element', call),
+      kind: 'styled-element',
+      label,
+      filePath,
+      line: call.getStartLineNumber(),
+      details: {
+        tag: parsed.tag,
+        localName: parsed.name,
+        component: component.node.label,
+        componentId: component.node.id,
+        depth,
+        branch: branchPathText(branch),
+        branchSegments: branch.map((segment) => ({ ...segment })),
+        mayContainText: textKind !== 'none',
+        textKind,
+        classKeys: classes.kind === 'resolved' ? classes.keys : [],
+      },
+    },
+    call,
+  );
+
+  if (classes.kind === 'resolved') {
+    for (const key of classes.keys) {
+      addEdge(builder, element.id, styleClassNodeId(key), 'styled-by', 'ast', {
+        classKey: key,
+      });
+    }
+  } else if (classes.kind === 'unresolved') {
+    // Not silence: an element the pass cannot attach to a class is an element
+    // the contrast report has to declare indeterminate, and it can only do
+    // that if the gap is recorded rather than skipped.
+    builder.diagnostics.push({
+      code: 'styled-element-class-unresolved',
+      message: `${component.node.label}: ${classes.detail}`,
+      proof: {
+        filePath,
+        line: call.getStartLineNumber(),
+        symbol: component.node.label,
+      },
+    });
+    element.details = {
+      ...(element.details ?? {}),
+      unresolvedClass: classes.detail,
+    };
+  }
+
+  return element;
+}
+
+/**
+ * The style-class node id, spelled here rather than imported.
+ *
+ * `style-graph.ts` imports this module; importing it back would close a cycle
+ * for one template literal. The two are pinned together by
+ * `style-graph.spec.ts`, which asserts they agree.
+ */
+export const styleClassNodeId = (key: string): string => `style-class:${key}`;
+
 function analyzePrimitiveInsertionMetadata(builder: GraphBuilder): void {
   const scopes: { node: Node; ownerId: string }[] = [];
   for (const service of builder.services) {
@@ -2134,7 +2628,9 @@ function analyzePrimitiveInsertionMetadata(builder: GraphBuilder): void {
   }
   for (const component of builder.components) {
     const setup = component.call.getArguments()[2];
-    if (setup) scopes.push({ node: setup, ownerId: component.node.id });
+    for (const node of componentImplementationParts(setup)) {
+      scopes.push({ node, ownerId: component.node.id });
+    }
   }
   for (const { node, ownerId } of scopes) {
     for (const call of node.getDescendantsOfKind(SyntaxKind.CallExpression)) {
@@ -2191,7 +2687,9 @@ function analyzeInsertions(builder: GraphBuilder): void {
   }
   for (const component of builder.components) {
     const setup = component.call.getArguments()[2];
-    if (setup) scopes.push({ node: setup, ownerId: component.node.id });
+    for (const node of componentImplementationParts(setup)) {
+      scopes.push({ node, ownerId: component.node.id });
+    }
   }
   for (const { node, ownerId } of scopes) {
     for (const call of node.getDescendantsOfKind(SyntaxKind.CallExpression)) {
@@ -2220,21 +2718,22 @@ function addExposedPrimitiveMethodUsageEdges(
     bindingNodes.map((node) => symbolKey(node.getSymbol())).filter(Boolean),
   );
   const bindingNames = new Set(
-    bindingNodes.map((node) => node.getText()).concat(
-      typeof primitive.details?.['name'] === 'string'
-        ? [primitive.details['name']]
-        : [],
-    ),
+    bindingNodes
+      .map((node) => node.getText())
+      .concat(
+        typeof primitive.details?.['name'] === 'string'
+          ? [primitive.details['name']]
+          : [],
+      ),
   );
   const primitiveName =
     typeof primitive.details?.['name'] === 'string'
       ? primitive.details['name']
       : undefined;
   const namedPrimitiveCount = primitiveName
-      ? [...builder.nodes.values()].filter(
+    ? [...builder.nodes.values()].filter(
         (node) =>
-          node.kind === 'primitive' &&
-          node.details?.['name'] === primitiveName,
+          node.kind === 'primitive' && node.details?.['name'] === primitiveName,
       ).length
     : 0;
   const ownerId =
@@ -2252,9 +2751,7 @@ function addExposedPrimitiveMethodUsageEdges(
       const nestedMethod = chain?.at(-1);
       const isNamedNestedMethod =
         Boolean(primitiveName) &&
-        (!root ||
-          chain?.length !== 2 ||
-          namedPrimitiveCount === 1) &&
+        (!root || chain?.length !== 2 || namedPrimitiveCount === 1) &&
         methods.has(method) &&
         access.getText().endsWith(`${primitiveName}.${method}`);
       if (
@@ -2321,11 +2818,13 @@ function primitiveVariableDeclaration(
 function bindingIdentifierNodes(node: Node): import('ts-morph').Identifier[] {
   if (Node.isIdentifier(node)) return [node];
   if (Node.isObjectBindingPattern(node) || Node.isArrayBindingPattern(node)) {
-    return node.getElements().flatMap((element) =>
-      Node.isBindingElement(element)
-        ? bindingIdentifierNodes(element.getNameNode())
-        : [],
-    );
+    return node
+      .getElements()
+      .flatMap((element) =>
+        Node.isBindingElement(element)
+          ? bindingIdentifierNodes(element.getNameNode())
+          : [],
+      );
   }
   return [];
 }
@@ -2375,19 +2874,26 @@ function collectInsertionMethods(node: Node, methods: Set<string>): void {
 }
 
 function isInsertionCallback(
-  node: import('ts-morph').ArrowFunction | import('ts-morph').FunctionExpression,
+  node:
+    | import('ts-morph').ArrowFunction
+    | import('ts-morph').FunctionExpression,
 ): boolean {
   const parameter = node.getParameters()[0]?.getNameNode();
   if (!parameter || !Node.isObjectBindingPattern(parameter)) return false;
-  return parameter.getElements().some((element) =>
-    INSERTION_CONTEXT_KEYS.has(
-      element.getPropertyNameNode()?.getText() ?? element.getNameNode().getText(),
-    ),
-  );
+  return parameter
+    .getElements()
+    .some((element) =>
+      INSERTION_CONTEXT_KEYS.has(
+        element.getPropertyNameNode()?.getText() ??
+          element.getNameNode().getText(),
+      ),
+    );
 }
 
 function returnedObject(
-  node: import('ts-morph').ArrowFunction | import('ts-morph').FunctionExpression,
+  node:
+    | import('ts-morph').ArrowFunction
+    | import('ts-morph').FunctionExpression,
 ): import('ts-morph').ObjectLiteralExpression | undefined {
   let body = node.getBody();
   if (Node.isParenthesizedExpression(body)) body = body.getExpression();
@@ -2508,7 +3014,13 @@ function analyzeRoutes(builder: GraphBuilder): void {
           )) {
             const component = findComponentForExpression(builder, identifier);
             if (component) {
-              addEdge(builder, route.node.id, component.node.id, 'loads', 'ast');
+              addEdge(
+                builder,
+                route.node.id,
+                component.node.id,
+                'loads',
+                'ast',
+              );
             }
           }
         }
@@ -2521,7 +3033,10 @@ function analyzeRoutes(builder: GraphBuilder): void {
           builder.project,
         );
         if (!target) continue;
-        const exportNames = findDynamicImportExportNames(route.object, specifier);
+        const exportNames = findDynamicImportExportNames(
+          route.object,
+          specifier,
+        );
         for (const component of builder.components.filter(
           (candidate) =>
             candidate.node.filePath === target.getFilePath() &&
@@ -2771,7 +3286,7 @@ function addSourceInteractions(
           addEdge(
             builder,
             source.node.id,
-            primitive ? primitiveNodeId(builder, primitive) : ownerId,
+            primitive ? primitiveNodeId(primitive) : ownerId,
             primitive ? 'triggers' : 'subscribes',
             'ast',
           );
@@ -2813,12 +3328,8 @@ function isExposedMachineSourceAccess(
   return sourceIndex > 0 && chain[sourceIndex + 1] === 'emit';
 }
 
-function primitiveNodeId(builder: GraphBuilder, call: CallExpression): string {
-  const owner = nearestPrimitiveFactory(call) ?? call;
-  const primitive =
-    primitiveFactoryName(owner) ?? primitiveName(owner) ?? 'primitive';
-  const sourceFile = call.getSourceFile();
-  return `primitive:${sourceFile.getFilePath()}:${primitive}:${owner.getStartLineNumber()}`;
+function primitiveNodeId(call: CallExpression): string {
+  return stablePrimitiveId(nearestPrimitiveFactory(call) ?? call);
 }
 
 function ownerNodeForCall(
@@ -3141,9 +3652,7 @@ function isResourcePrimitive(call: CallExpression): boolean {
   );
 }
 
-function resourceParamsInitializer(
-  call: CallExpression,
-): Node | undefined {
+function resourceParamsInitializer(call: CallExpression): Node | undefined {
   for (const argument of call.getArguments()) {
     const object = argument.asKind(SyntaxKind.ObjectLiteralExpression);
     const property = object?.getProperty('params');
@@ -3205,7 +3714,8 @@ function localFunctionDeclaration(
     const initializer = declaration.getInitializer();
     if (
       initializer &&
-      (Node.isArrowFunction(initializer) || Node.isFunctionExpression(initializer))
+      (Node.isArrowFunction(initializer) ||
+        Node.isFunctionExpression(initializer))
     ) {
       return declaration;
     }
@@ -3220,7 +3730,8 @@ function functionDeclarationBody(
     return declaration.getBody() ?? declaration;
   }
   const initializer = declaration.getInitializer();
-  return Node.isArrowFunction(initializer) || Node.isFunctionExpression(initializer)
+  return Node.isArrowFunction(initializer) ||
+    Node.isFunctionExpression(initializer)
     ? initializer.getBody()
     : declaration;
 }
@@ -3296,7 +3807,7 @@ type PrimitiveMethodAlias = {
  * template. A wrapper such as `() => counter.increment()` is intentionally not
  * equivalent: it is a new call site with its own behavior.
  */
-function collectPrimitiveMethodAliases(
+export function collectPrimitiveMethodAliases(
   builder: GraphBuilder,
   component: ComponentInfo,
   template: Node,
@@ -3423,7 +3934,7 @@ function isFunctionNode(
   return Node.isArrowFunction(node) || Node.isFunctionExpression(node);
 }
 
-function collectReactiveExpressions(scope: Node): Node[] {
+export function collectReactiveExpressions(scope: Node): Node[] {
   const expressions: Node[] = [];
   const seen = new Set<Node>();
   const add = (node: Node | undefined): void => {
@@ -3463,7 +3974,7 @@ function collectReactiveExpressions(scope: Node): Node[] {
   return expressions;
 }
 
-function resolveReactiveTarget(
+export function resolveReactiveTarget(
   builder: GraphBuilder,
   expression: Node | undefined,
   bindings: Map<string, ReactiveBinding>,
@@ -3741,17 +4252,21 @@ function addPrimitiveMemberProperty(
   const exposedMethods = readStringArray(
     primitive?.details?.['exposedMethods'],
   );
-  const propertyNode = addNode(builder, {
-    id: `property:${primitiveId}:${memberPath}`,
-    kind: 'property',
-    label: `${primitive?.label ?? primitiveId}.${memberPath}`,
-    filePath: node.getSourceFile().getFilePath(),
-    line: node.getStartLineNumber(),
-    details: {
-      member: memberPath,
-      ...(exposedMethods.includes(member) ? { exposedMethod: true } : {}),
+  const propertyNode = addNode(
+    builder,
+    {
+      id: `property:${primitiveId}:${memberPath}`,
+      kind: 'property',
+      label: `${primitive?.label ?? primitiveId}.${memberPath}`,
+      filePath: node.getSourceFile().getFilePath(),
+      line: node.getStartLineNumber(),
+      details: {
+        member: memberPath,
+        ...(exposedMethods.includes(member) ? { exposedMethod: true } : {}),
+      },
     },
-  });
+    node,
+  );
   addEdge(builder, primitiveId, propertyNode.id, 'contains', 'ast', {
     property: memberPath.split('.')[0],
   });
@@ -3764,14 +4279,18 @@ function addServiceMemberProperty(
   memberPath: string,
   node: Node,
 ): DependencyGraphNode {
-  const propertyNode = addNode(builder, {
-    id: `property:${service.node.id}:${memberPath}`,
-    kind: 'property',
-    label: `${service.node.label}.${memberPath}`,
-    filePath: service.node.filePath,
-    line: node.getStartLineNumber(),
-    details: { member: memberPath },
-  });
+  const propertyNode = addNode(
+    builder,
+    {
+      id: `property:${service.node.id}:${memberPath}`,
+      kind: 'property',
+      label: `${service.node.label}.${memberPath}`,
+      filePath: service.node.filePath,
+      line: node.getStartLineNumber(),
+      details: { member: memberPath },
+    },
+    node,
+  );
   addEdge(builder, service.node.id, propertyNode.id, 'contains', 'type', {
     member: memberPath,
   });
@@ -3845,7 +4364,9 @@ function isLikelyMethod(
   if (primitiveId) {
     if (
       leaf &&
-      readStringArray(builder.nodes.get(primitiveId)?.details?.['exposedMethods']).includes(leaf)
+      readStringArray(
+        builder.nodes.get(primitiveId)?.details?.['exposedMethods'],
+      ).includes(leaf)
     ) {
       return true;
     }
@@ -3910,7 +4431,7 @@ function initializerProperty(
   return initializer === call ? property : undefined;
 }
 
-function templateParameterNames(template: Node): Set<string> {
+export function templateParameterNames(template: Node): Set<string> {
   if (
     !template.isKind(SyntaxKind.ArrowFunction) &&
     !template.isKind(SyntaxKind.FunctionExpression)
@@ -3921,7 +4442,9 @@ function templateParameterNames(template: Node): Set<string> {
   return new Set(parameter ? getBindingNames(parameter) : []);
 }
 
-function isBindingName(identifier: import('ts-morph').Identifier): boolean {
+export function isBindingName(
+  identifier: import('ts-morph').Identifier,
+): boolean {
   const parent = identifier.getParent();
   return (
     parent?.isKind(SyntaxKind.BindingElement) === true ||
@@ -3946,19 +4469,23 @@ function addPrimitiveNode(
 ): DependencyGraphNode {
   const name = getStringArgument(call, 0) ?? primitive;
   const usage = primitiveUsageName(call);
-  return addNode(builder, {
-    id: `primitive:${call.getSourceFile().getFilePath()}:${primitive}:${call.getStartLineNumber()}`,
-    kind: 'primitive',
-    label: `${primitive}:${name}`,
-    filePath: call.getSourceFile().getFilePath(),
-    line: call.getStartLineNumber(),
-    details: {
-      primitive,
-      name,
-      ownerId,
-      ...(usage ? { usage } : {}),
+  return addNode(
+    builder,
+    {
+      id: stablePrimitiveId(call, primitive),
+      kind: 'primitive',
+      label: `${primitive}:${name}`,
+      filePath: call.getSourceFile().getFilePath(),
+      line: call.getStartLineNumber(),
+      details: {
+        primitive,
+        name,
+        ownerId,
+        ...(usage ? { usage } : {}),
+      },
     },
-  });
+    call,
+  );
 }
 
 function addHttpClientUsage(
@@ -4099,7 +4626,7 @@ function addCraftUniqueUsage(
   const canonicalized = canonicalizeStaticValue(call.getArguments()[0]);
   const id = canonicalized.static
     ? `unique:${createHash('sha256').update(canonicalized.canonical).digest('hex').slice(0, 16)}`
-    : `unique:non-static:${sourceFile.getFilePath()}:${line}`;
+    : stableNodeId('unique:non-static', 'unique', call);
   const label = canonicalized.static
     ? canonicalized.canonical
     : 'craftUnique(non-static)';
@@ -4149,7 +4676,7 @@ function findCraftUniqueOwnerId(
   const enclosing = nearestPrimitiveFactory(call);
   const primitive = enclosing && primitiveFactoryName(enclosing);
   if (enclosing && primitive) {
-    const id = `primitive:${enclosing.getSourceFile().getFilePath()}:${primitive}:${enclosing.getStartLineNumber()}`;
+    const id = stablePrimitiveId(enclosing, primitive);
     if (builder.nodes.has(id)) return id;
   }
   let current: Node | undefined = call.getParent();
@@ -4445,6 +4972,12 @@ function getStaticExpressionText(node: Node | undefined): string | undefined {
   if (!node) return undefined;
   if (Node.isStringLiteral(node)) return node.getLiteralValue();
   if (Node.isNoSubstitutionTemplateLiteral(node)) return node.getLiteralValue();
+  if (Node.isTemplateExpression(node)) {
+    return `${node.getHead().getLiteralText()}${node
+      .getTemplateSpans()
+      .map((span) => `*${span.getLiteral().getLiteralText()}`)
+      .join('')}`;
+  }
   const text = node.getText().trim();
   return text.length > 0 ? text : undefined;
 }
@@ -4737,9 +5270,14 @@ function findDynamicImportExportNames(
   return undefined;
 }
 
-function extractDynamicImportExportNames(call: CallExpression): string[] | undefined {
+function extractDynamicImportExportNames(
+  call: CallExpression,
+): string[] | undefined {
   const callback = call.getArguments()[0];
-  if (!callback || (!Node.isArrowFunction(callback) && !Node.isFunctionExpression(callback))) {
+  if (
+    !callback ||
+    (!Node.isArrowFunction(callback) && !Node.isFunctionExpression(callback))
+  ) {
     return undefined;
   }
   const parameter = callback.getParameters()[0];
@@ -4748,11 +5286,13 @@ function extractDynamicImportExportNames(call: CallExpression): string[] | undef
 
   const bindingPattern = parameter.getNameNode();
   if (Node.isObjectBindingPattern(bindingPattern) && Node.isIdentifier(body)) {
-    const binding = bindingPattern.getElements().find(
-      (element) =>
-        Node.isBindingElement(element) &&
-        element.getNameNode().getText() === body.getText(),
-    );
+    const binding = bindingPattern
+      .getElements()
+      .find(
+        (element) =>
+          Node.isBindingElement(element) &&
+          element.getNameNode().getText() === body.getText(),
+      );
     if (binding && Node.isBindingElement(binding)) {
       return [binding.getPropertyNameNode()?.getText() ?? body.getText()];
     }
@@ -4799,10 +5339,229 @@ function resolveImportedSource(
     .find((candidate): candidate is SourceFile => candidate !== undefined);
 }
 
+/* -------------------------------------------------------------------------
+ * Stable identity
+ *
+ * A node id used to end in the line its call sits on, so moving a block three
+ * lines down renamed every node under it. Anything that keys off an id — an
+ * attestation ledger above all — is worthless under that rule: every commit
+ * would invalidate the whole register.
+ *
+ * The replacement is `file#owner/name/ordinal`. The owner is the chain of
+ * declaration names the call is nested in, the name is what the call is
+ * called, and the ordinal only ever separates two siblings that agree on both.
+ * The line survives on the node as metadata, and is never hashed.
+ * ------------------------------------------------------------------------- */
+
+type StableFamily =
+  | 'primitive'
+  | 'source'
+  | 'component'
+  | 'template-element'
+  | 'styled-element'
+  | 'unique'
+  | 'route-check';
+
+/**
+ * Per file, per family, the sorted start offsets of every call sharing a key.
+ *
+ * Built in one pass over the file the first time a family is asked for, so an
+ * ordinal never depends on the order the graph happened to visit nodes in.
+ */
+const STABLE_INDEX = new WeakMap<
+  SourceFile,
+  Map<StableFamily, Map<string, number[]>>
+>();
+
+/** The chain of declaration names a node is nested in, outermost first. */
+function stableOwnerPath(node: Node): string {
+  const parts: string[] = [];
+  let current: Node | undefined = node.getParent();
+  while (current) {
+    const segment = stableOwnerSegment(current);
+    if (segment) parts.push(segment);
+    current = current.getParent();
+  }
+  return parts.reverse().join('/');
+}
+
+function stableOwnerSegment(node: Node): string | undefined {
+  if (Node.isVariableDeclaration(node)) {
+    const name = node.getNameNode();
+    return Node.isIdentifier(name) ? name.getText() : undefined;
+  }
+  if (Node.isFunctionDeclaration(node) || Node.isClassDeclaration(node)) {
+    return node.getName();
+  }
+  if (
+    Node.isMethodDeclaration(node) ||
+    Node.isPropertyDeclaration(node) ||
+    Node.isPropertyAssignment(node)
+  ) {
+    return node.getName();
+  }
+  if (Node.isCallExpression(node)) {
+    const callee = node.getExpression();
+    if (!Node.isIdentifier(callee)) return undefined;
+    const label = getStringArgument(node, 0);
+    return label ? `${callee.getText()}(${label})` : `${callee.getText()}()`;
+  }
+  return undefined;
+}
+
+/**
+ * The key two nodes must share before an ordinal is needed to tell them apart.
+ *
+ * Deliberately computed from the AST alone: the index pass and the lookup have
+ * to agree, and the index pass knows nothing of what the caller intends to
+ * label the node.
+ */
+function stableFamilyKey(
+  family: StableFamily,
+  call: CallExpression,
+): string | undefined {
+  const owner = stableOwnerPath(call);
+  const callee = call.getExpression().getText();
+  switch (family) {
+    case 'primitive': {
+      const primitive = primitiveFactoryName(call) ?? primitiveName(call);
+      if (!primitive) return `${owner}/call:${callee}`;
+      const name =
+        getStringArgument(call, 0) ?? primitiveUsageName(call) ?? primitive;
+      return `${owner}/${primitive}:${name}`;
+    }
+    case 'source': {
+      if (!SOURCE_CREATORS.has(callee)) return undefined;
+      return `${owner}/${callee}:${getStringArgument(call, 0) ?? callee}`;
+    }
+    case 'component':
+      return callee === 'craftComponent'
+        ? `${owner}/craftComponent`
+        : undefined;
+    case 'template-element': {
+      const parsed = parseCraftHyperscript(call);
+      if (!parsed || !isInteractiveElement(parsed)) return undefined;
+      return `${owner}/${parsed.tag}:${parsed.name ?? '(unnamed)'}`;
+    }
+    // Its own family, and not a widening of the one above: the interactive
+    // family must keep indexing only interactive calls, or every existing
+    // `template-element` id would shift the moment a `div` is added beside it.
+    case 'styled-element': {
+      const parsed = parseCraftHyperscript(call);
+      if (!parsed) return undefined;
+      return `${owner}/${parsed.tag}:${parsed.name ?? '(unnamed)'}`;
+    }
+    case 'unique':
+      return callee === 'craftUnique' ? `${owner}/craftUnique` : undefined;
+    case 'route-check':
+      return callee === 'assertExhaustiveRouteExceptions'
+        ? `${owner}/assertExhaustiveRouteExceptions`
+        : undefined;
+  }
+}
+
+function stableOrdinal(
+  family: StableFamily,
+  call: CallExpression,
+  key: string,
+): number {
+  const sourceFile = call.getSourceFile();
+  let families = STABLE_INDEX.get(sourceFile);
+  if (!families) {
+    families = new Map();
+    STABLE_INDEX.set(sourceFile, families);
+  }
+  let buckets = families.get(family);
+  if (!buckets) {
+    buckets = new Map<string, number[]>();
+    for (const candidate of sourceFile.getDescendantsOfKind(
+      SyntaxKind.CallExpression,
+    )) {
+      const candidateKey = stableFamilyKey(family, candidate);
+      if (candidateKey === undefined) continue;
+      const bucket = buckets.get(candidateKey);
+      if (bucket) bucket.push(candidate.getStart());
+      else buckets.set(candidateKey, [candidate.getStart()]);
+    }
+    for (const bucket of buckets.values()) {
+      bucket.sort((left, right) => left - right);
+    }
+    families.set(family, buckets);
+  }
+  const index = buckets.get(key)?.indexOf(call.getStart()) ?? -1;
+  return index < 0 ? 0 : index;
+}
+
+/** `file#owner/name/ordinal`, with the kind kept in front for readability. */
+export function stableNodeId(
+  kind: string,
+  family: StableFamily,
+  call: CallExpression,
+  suffix?: string,
+): string {
+  const key = stableFamilyKey(family, call);
+  const filePath = call.getSourceFile().getFilePath();
+  const tail = suffix === undefined ? '' : `!${suffix}`;
+  if (key === undefined) {
+    // Nothing in the family recognises this call: fall back to the owner path,
+    // which is still line-free.
+    const callee = call.getExpression().getText();
+    return `${kind}:${filePath}#${stableOwnerPath(call)}/${callee}/0${tail}`;
+  }
+  return `${kind}:${filePath}#${key}/${stableOrdinal(family, call, key)}${tail}`;
+}
+
+/**
+ * The id of the primitive node a call stands for.
+ *
+ * `primitive` is threaded through because a few collectors label a call with a
+ * primitive name the AST does not derive; the override lands in the id's tail
+ * rather than in its key, so the ordinal is always read from an index entry
+ * that exists.
+ */
+function stablePrimitiveId(call: CallExpression, primitive?: string): string {
+  const derived = primitiveFactoryName(call) ?? primitiveName(call);
+  const suffix =
+    primitive !== undefined && primitive !== derived ? primitive : undefined;
+  return stableNodeId('primitive', 'primitive', call, suffix);
+}
+
+/**
+ * What names an anonymous `craftComponent` once its line is gone.
+ *
+ * The declaration it is assigned to when there is one — which is the name a
+ * reader would use anyway — and the ordinal otherwise.
+ */
+function anonymousComponentSuffix(call: CallExpression): string {
+  const owner = stableOwnerPath(call);
+  if (owner) return owner;
+  const key = stableFamilyKey('component', call);
+  return `#${key === undefined ? 0 : stableOrdinal('component', call, key)}`;
+}
+
+/** Hash of a declaration's own text, leading trivia excluded. */
+function hashSourceRange(node: Node): string {
+  return createHash('sha256').update(node.getText()).digest('hex').slice(0, 16);
+}
+
+/**
+ * Registers a node, optionally recording the source range it stands for.
+ *
+ * The range is attached here rather than at each collector so a node
+ * discovered twice — once with its declaration in hand, once without — still
+ * ends up carrying a hash.
+ */
 function addNode(
   builder: GraphBuilder,
   node: DependencyGraphNode,
+  source?: Node,
 ): DependencyGraphNode {
+  const span: Partial<DependencyGraphNode> = source
+    ? {
+        endLine: source.getEndLineNumber(),
+        sourceHash: hashSourceRange(source),
+      }
+    : {};
   const existing = builder.nodes.get(node.id);
   if (existing) {
     if (existing.kind !== node.kind || existing.label !== node.label) {
@@ -4810,10 +5569,14 @@ function addNode(
         `Dependency graph node identity collision for "${node.id}": ${existing.kind}/${existing.label} versus ${node.kind}/${node.label}.`,
       );
     }
+    if (existing.sourceHash === undefined && span.sourceHash !== undefined) {
+      Object.assign(existing, span);
+    }
     return existing;
   }
-  builder.nodes.set(node.id, node);
-  return node;
+  const created = { ...node, ...span };
+  builder.nodes.set(created.id, created);
+  return created;
 }
 
 function mergeCollectorContribution(
@@ -5465,9 +6228,7 @@ function collectServerFunctionMiddlewares(
     // dépendance — mais le graphe garde de laquelle il s'agit : c'est ce qui
     // permet de vérifier qu'un exemple migré ne passe plus par `.use(...)`.
     const composed: readonly (readonly [string, 'use' | 'pipe'])[] = [
-      ...(server?.middlewareUses ?? []).map(
-        (used) => [used, 'use'] as const,
-      ),
+      ...(server?.middlewareUses ?? []).map((used) => [used, 'use'] as const),
       ...(server?.layerPipes ?? []).map((used) => [used, 'pipe'] as const),
     ];
     for (const [used, composition] of composed) {
@@ -6473,9 +7234,7 @@ function readCallSite(value: unknown): GraphCallSite {
       ? { filePath: site['filePath'] }
       : {}),
     ...(typeof site['line'] === 'number' ? { line: site['line'] } : {}),
-    ...(typeof site['offset'] === 'number'
-      ? { offset: site['offset'] }
-      : {}),
+    ...(typeof site['offset'] === 'number' ? { offset: site['offset'] } : {}),
   };
 }
 

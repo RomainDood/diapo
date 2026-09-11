@@ -29,7 +29,7 @@ export default defineConfig(() => ({
       ),
       '@craft-ts/style-testing': path.join(
         workspaceRoot,
-        'libs/style-testing/src/index.ts',
+        'libs/review-attestation/src/index.ts',
       ),
       '@craft-ts/style': path.join(workspaceRoot, 'libs/style/src/index.ts'),
       '@craft-ts/i18n-effect': path.join(
@@ -61,6 +61,10 @@ export default defineConfig(() => ({
       '@craft-ts/dev-tools/dependency-graph': path.join(
         workspaceRoot,
         'libs/dev-tools/src/scripts/dependency-graph.ts',
+      ),
+      '@craft-ts/dev-tools/contrast': path.join(
+        workspaceRoot,
+        'libs/dev-tools/src/scripts/contrast.ts',
       ),
       '@craft-ts/dev-tools': path.join(
         workspaceRoot,

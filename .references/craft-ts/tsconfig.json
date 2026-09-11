@@ -25,6 +25,9 @@
       "path": "./libs/effect"
     },
     {
+      "path": "./libs/attest"
+    },
+    {
       "path": "./libs/deploy"
     },
     {
@@ -34,7 +37,7 @@
       "path": "./libs/deploy-alchemy"
     },
     {
-      "path": "./libs/style-testing"
+      "path": "./libs/review-attestation"
     },
     {
       "path": "./libs/style"

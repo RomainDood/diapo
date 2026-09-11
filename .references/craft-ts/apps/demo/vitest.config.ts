@@ -22,7 +22,7 @@ export default defineConfig({
 
       '@craft-ts/style-testing': path.join(
         workspaceRoot,
-        'libs/style-testing/src/index.ts',
+        'libs/review-attestation/src/index.ts',
       ),
       // More specific first: a bare '@craft-ts/style' alias matches this
       // specifier as a prefix and would swallow it.
@@ -31,6 +31,12 @@ export default defineConfig({
         'libs/style/src/plugin/vite.ts',
       ),
       '@craft-ts/style': path.join(workspaceRoot, 'libs/style/src/index.ts'),
+      // The subpath first: Vite matches aliases in order, and the bare entry
+      // below would otherwise swallow it and pull ts-morph into a jsdom run.
+      '@craft-ts/dev-tools/contrast': path.join(
+        workspaceRoot,
+        'libs/dev-tools/src/scripts/contrast.ts',
+      ),
       '@craft-ts/dev-tools': path.join(
         workspaceRoot,
         'libs/dev-tools/src/index.ts',
