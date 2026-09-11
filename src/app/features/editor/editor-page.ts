@@ -1,4 +1,4 @@
-/* eslint-disable craft-ts/require-effect-adapters, craft-ts/no-imperative-craft-method-actions, craft-ts/no-ephemeral-template-form-state, craft-ts/require-primitive-derived-property, craft-ts/require-craft-resource-trigger-yield -- The browser file directive triggers the async upload process; the editor projects keyed section/sequence inputs. */
+/* eslint-disable craft-ts/require-effect-adapters, craft-ts/no-imperative-craft-method-actions, craft-ts/no-ephemeral-template-form-state, craft-ts/require-primitive-derived-property -- The browser file directive triggers the async upload process; the editor projects keyed section/sequence inputs. */
 import {
   a,
   button,
@@ -33,7 +33,7 @@ import {
   signalSource,
 } from '@craft-ts/core';
 import { i18n } from '../../../i18n';
-import { loadPresentation, savePresentation, uploadPresentationImage } from '../../api';
+import { listDemoWorkspaceConfigs, loadPresentation, saveDemoWorkspaceConfig as saveDemoWorkspaceConfigRequest, savePresentation, uploadPresentationImage } from '../../api';
 import {
   PRESENTATION_CODE_LANGUAGES,
   PRESENTATION_IMAGE_ALLOWED_ORIGINS,
@@ -69,6 +69,7 @@ import type {
   PresentationThemeId,
   PresentationDecoration,
   PresentationDemoWorkspaceId,
+  PresentationDemoWorkspaceConfig,
 } from '../../../shared/presentation';
 import { eventValue } from '../../event-value';
 
@@ -158,6 +159,10 @@ function decorationLabel(value: PresentationDecoration): string {
   if (value === 'grid') return i18n.t('ui.editor.decoration.grid');
   if (value === 'none') return i18n.t('ui.editor.decoration.none');
   return i18n.t('ui.editor.decoration.orb');
+}
+
+function demoWorkspaceOrNone(value: PresentationDemoWorkspaceId | undefined): PresentationDemoWorkspaceId {
+  return value ?? 'none';
 }
 
 const readPresentationImageFile = craftNodeDirective(
@@ -269,6 +274,11 @@ export const EditorPage = craftComponent(
     const markdownErrors = yield* state('markdownErrors', [] as readonly string[], ({ set }) => ({
       replace: (value: readonly string[]) => set(value),
     }));
+    const newDemoWorkspaceId = yield* state('newDemoWorkspaceId', '', ({ set }) => ({ setValue: (value: string) => set(value) }));
+    const newDemoWorkspaceTitle = yield* state('newDemoWorkspaceTitle', '', ({ set }) => ({ setValue: (value: string) => set(value) }));
+    const newDemoWorkspaceDirectory = yield* state('newDemoWorkspaceDirectory', '', ({ set }) => ({ setValue: (value: string) => set(value) }));
+    const newDemoWorkspaceCommand = yield* state('newDemoWorkspaceCommand', 'npm start', ({ set }) => ({ setValue: (value: string) => set(value) }));
+    const newDemoWorkspacePort = yield* state('newDemoWorkspacePort', '4300', ({ set }) => ({ setValue: (value: string) => set(value) }));
     const draftChanges = signalSource<PresentationStoreInput>('draftChanges');
     const save = yield* mutation('savePresentation', {
       method: afterRecomputation(draftChanges, (value) => value),
@@ -288,6 +298,21 @@ export const EditorPage = craftComponent(
         update: ({ mutationResource, queryResource }) => mutationResource.value() ?? queryResource.value() ?? EMPTY_DOCUMENT,
       }),
     );
+    const saveDemoWorkspaceConfig = yield* mutation('saveDemoWorkspaceConfig', {
+      method: (config: PresentationDemoWorkspaceConfig) => config,
+      loader: function* ({ params }) {
+        return yield* saveDemoWorkspaceConfigRequest(params);
+      },
+    });
+    const demoWorkspaceConfigs = yield* query('demoWorkspaceConfigs', {
+      params: () => 'local',
+      loader: function* () {
+        return yield* listDemoWorkspaceConfigs();
+      },
+    }, insertReactOnMutation(saveDemoWorkspaceConfig, { reload: { onMutationResolved: true } }));
+    const demoWorkspaceConfigList = craftComputed('demoWorkspaceConfigList', function* () {
+      return (yield* demoWorkspaceConfigs.value()) ?? [];
+    });
     const imageUpload = yield* asyncProcess('uploadPresentationImage', {
       method: (input: ImageUploadProcessParams) => input,
       loader: function* ({ params }) {
@@ -447,6 +472,22 @@ export const EditorPage = craftComponent(
     const updateDemoWorkspace = craftMethod('updateDemoWorkspace', function* (demoWorkspaceId: PresentationDemoWorkspaceId) {
       const document = yield* currentDocument();
       const nextDocument = { ...document, demoWorkspaceId };
+      yield* draft.replace(nextDocument);
+      draftChanges.set(toStoreInput(nextDocument));
+    });
+    const saveLocalDemoWorkspace = craftMethod('saveLocalDemoWorkspace', function* () {
+      const config: PresentationDemoWorkspaceConfig = {
+        id: (yield* newDemoWorkspaceId()).trim(),
+        title: (yield* newDemoWorkspaceTitle()).trim(),
+        directory: (yield* newDemoWorkspaceDirectory()).trim(),
+        command: (yield* newDemoWorkspaceCommand()).trim(),
+        port: Number.parseInt((yield* newDemoWorkspacePort()).trim(), 10),
+      };
+      if (!config.id || !config.title || !config.directory || !config.command || !Number.isInteger(config.port)) return;
+      yield* saveDemoWorkspaceConfig.mutate(config);
+      yield* demoWorkspaceConfigs.resource.reload();
+      const document = yield* currentDocument();
+      const nextDocument = { ...document, demoWorkspaceId: config.id };
       yield* draft.replace(nextDocument);
       draftChanges.set(toStoreInput(nextDocument));
     });
@@ -686,6 +727,8 @@ export const EditorPage = craftComponent(
     });
     return {
       presentation,
+      demoWorkspaceConfigs,
+      demoWorkspaceConfigList,
       currentDocument,
       exportFormat,
       authoringMode,
@@ -722,6 +765,12 @@ export const EditorPage = craftComponent(
       updateCoverImageAlt,
       updateLayout,
       updateDemoWorkspace,
+      newDemoWorkspaceId,
+      newDemoWorkspaceTitle,
+      newDemoWorkspaceDirectory,
+      newDemoWorkspaceCommand,
+      newDemoWorkspacePort,
+      saveLocalDemoWorkspace,
       updateBackgroundType,
       updateBackgroundTheme,
       updateBackgroundGradientStart,
@@ -748,7 +797,7 @@ export const EditorPage = craftComponent(
       presentationId,
     };
   },
-  ({ presentation, currentDocument, hasDocument, exportFormat, markdownValue, isMarkdownMode, isVisualMode, hasMarkdownErrors, isMarkdownValid, markdownErrorMessage, exportContent, exportFilename, hasCoverImage, hasBackgroundMedia, isThemeBackground, isMediaBackground, isImageBackground, isVideoBackground, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, startMarkdownMode, startVisualMode, updateMarkdown, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateDemoWorkspace, updateBackgroundType, updateBackgroundTheme, updateBackgroundGradientStart, updateBackgroundGradientMiddle, updateBackgroundGradientEnd, updateBackgroundGradientAngle, updateBackgroundUrl, updateBackgroundDecoration, updateBackgroundDecorationColor, clearImage, updateSection, updateSequence, sectionViews, toggleSection, moveSection, moveSequence, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
+  ({ presentation, currentDocument, demoWorkspaceConfigList, hasDocument, exportFormat, markdownValue, isMarkdownMode, isVisualMode, hasMarkdownErrors, isMarkdownValid, markdownErrorMessage, exportContent, exportFilename, hasCoverImage, hasBackgroundMedia, isThemeBackground, isMediaBackground, isImageBackground, isVideoBackground, coverImageAlt, imageUploading, imageUploadFailed, imageUploadErrorMessage, imageUploadNotice, hasImageUploadNotice, isAutosaving, autosaveStatus, startMarkdownMode, startVisualMode, updateMarkdown, updateTitle, updateAudience, updateObjective, updateCoverImageAlt, updateLayout, updateDemoWorkspace, newDemoWorkspaceId, newDemoWorkspaceTitle, newDemoWorkspaceDirectory, newDemoWorkspaceCommand, newDemoWorkspacePort, saveLocalDemoWorkspace, updateBackgroundType, updateBackgroundTheme, updateBackgroundGradientStart, updateBackgroundGradientMiddle, updateBackgroundGradientEnd, updateBackgroundGradientAngle, updateBackgroundUrl, updateBackgroundDecoration, updateBackgroundDecorationColor, clearImage, updateSection, updateSequence, sectionViews, toggleSection, moveSection, moveSequence, handleImageFile, addSection, addSequence, deleteSequence, saveChanges, presentationId }) =>
     div({ class: 'editor-shell' }, [
       div({ class: 'editor-toolbar' }, [
           a('backToDashboard', { class: 'studio-link', 'aria-label': i18n.t('ui.editor.backToDashboard'), 'data-navigation': 'external', href: '/feature' }, i18n.t('ui.editor.backToDashboard')),
@@ -787,6 +836,7 @@ export const EditorPage = craftComponent(
             p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleSections')),
             p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleCode')),
             p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleNotes')),
+            p({ class: 'editor-markdown-help__rule' }, i18n.t('ui.editor.markdownRuleDemo')),
           ]),
           textarea('presentationMarkdown', { 'aria-label': i18n.t('ui.editor.markdownTitle'), class: 'editor-markdown-input', spellcheck: false, value: markdownValue, *input(event) { yield* updateMarkdown(eventValue(event)); } }),
         ]),
@@ -803,7 +853,16 @@ export const EditorPage = craftComponent(
         ]),
         select('presentationDemoWorkspace', { 'aria-label': i18n.t('ui.editor.demoWorkspaceLabel'), class: 'editor-layout-select', value: function* () { return (yield* currentDocument()).demoWorkspaceId; }, *change(event) { yield* updateDemoWorkspace(eventValue(event) as PresentationDemoWorkspaceId); } }, [
           option({ value: 'none' }, i18n.t('ui.editor.demoWorkspaceNone')),
-          option({ value: 'angular-route-resources' }, i18n.t('ui.editor.demoWorkspaceAngularRouteResources')),
+          forNode(demoWorkspaceConfigList, { track: (config) => config.id }, (configInput) => option({ value: function* () { return (yield* configInput()).id; } }, function* () { return (yield* configInput()).title; })),
+        ]),
+        div({ class: 'editor-demo-workspace-settings' }, [
+          span({ class: 'studio-panel__label' }, i18n.t('ui.editor.demoWorkspaceAddLabel')),
+          input('newDemoWorkspaceId', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceIdLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceIdPlaceholder'), value: newDemoWorkspaceId, *input(event) { yield* newDemoWorkspaceId.setValue(eventValue(event)); } }),
+          input('newDemoWorkspaceTitle', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceTitleLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceTitlePlaceholder'), value: newDemoWorkspaceTitle, *input(event) { yield* newDemoWorkspaceTitle.setValue(eventValue(event)); } }),
+          input('newDemoWorkspaceDirectory', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceDirectoryLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceDirectoryPlaceholder'), value: newDemoWorkspaceDirectory, *input(event) { yield* newDemoWorkspaceDirectory.setValue(eventValue(event)); } }),
+          input('newDemoWorkspaceCommand', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceCommandLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceCommandPlaceholder'), value: newDemoWorkspaceCommand, *input(event) { yield* newDemoWorkspaceCommand.setValue(eventValue(event)); } }),
+          input('newDemoWorkspacePort', { type: 'number', 'aria-label': i18n.t('ui.editor.demoWorkspacePortLabel'), placeholder: i18n.t('ui.editor.demoWorkspacePortPlaceholder'), value: newDemoWorkspacePort, *input(event) { yield* newDemoWorkspacePort.setValue(eventValue(event)); } }),
+          button('saveLocalDemoWorkspace', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.demoWorkspaceAdd'), click: saveLocalDemoWorkspace }, i18n.t('ui.editor.demoWorkspaceAdd')),
         ]),
         div({ class: 'editor-background-settings' }, [
           div({ class: 'editor-background-settings__header' }, [
@@ -902,6 +961,10 @@ export const EditorPage = craftComponent(
               button('toggleSection', { type: 'button', class: 'editor-section-toggle', 'aria-expanded': function* () { return String((yield* sectionViewInput()).isExpanded); }, 'aria-label': function* () { return (yield* sectionViewInput()).toggleLabel; }, click: function* () { yield* toggleSection((yield* sectionViewInput()).section.id); } }, function* () { return (yield* sectionViewInput()).toggleIcon; }),
               input('sectionTitle', { type: 'text', 'aria-label': i18n.t('ui.editor.sectionTitleLabel'), class: 'editor-section-title', value: function* () { return (yield* sectionViewInput()).section.title; }, *input(event) { const section = (yield* sectionViewInput()).section; yield* updateSection(section.id, { title: eventValue(event) }); } }),
               select('sectionIntention', { 'aria-label': i18n.t('ui.editor.sectionIntentionLabel'), class: 'editor-section-intention', value: function* () { return (yield* sectionViewInput()).section.intention; }, *change(event) { const section = (yield* sectionViewInput()).section; yield* updateSection(section.id, { intention: eventValue(event) as PresentationIntention }); } }, PRESENTATION_INTENTIONS.map((intention) => option({ value: intention }, intention))),
+              select('sectionDemoWorkspace', { 'aria-label': i18n.t('ui.editor.demoWorkspaceSectionLabel'), class: 'editor-section-intention', value: function* () { return demoWorkspaceOrNone((yield* sectionViewInput()).section.demoWorkspaceId); }, *change(event) { const section = (yield* sectionViewInput()).section; yield* updateSection(section.id, { demoWorkspaceId: eventValue(event) }); } }, [
+                option({ value: 'none' }, i18n.t('ui.editor.demoWorkspaceNone')),
+                forNode(demoWorkspaceConfigList, { track: (config) => config.id }, (configInput) => option({ value: function* () { return (yield* configInput()).id; } }, function* () { return (yield* configInput()).title; })),
+              ]),
               div({ class: 'editor-section-card__actions' }, [
                 button('moveSectionUp', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.moveSectionUp'), disabled: function* () { return (yield* sectionViewInput()).canMoveUp === false; }, click: function* () { yield* moveSection((yield* sectionViewInput()).section.id, 'up'); } }, '↑'),
                 button('moveSectionDown', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.moveSectionDown'), disabled: function* () { return (yield* sectionViewInput()).canMoveDown === false; }, click: function* () { yield* moveSection((yield* sectionViewInput()).section.id, 'down'); } }, '↓'),
@@ -910,6 +973,10 @@ export const EditorPage = craftComponent(
             div({ class: 'editor-section-card__body', 'data-collapsed': function* () { return String((yield* sectionViewInput()).isCollapsed); } }, [
             forNode(function* () { return (yield* sectionViewInput()).section.sequences; }, { track: (sequence) => sequence.id }, (sequenceInput) => div({ class: 'editor-sequence-card' }, [
               input('sequenceTitle', { type: 'text', 'aria-label': i18n.t('ui.editor.sequenceTitleLabel'), class: 'editor-sequence-title', value: function* () { return (yield* sequenceInput()).title; }, *input(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { title: eventValue(event) }); } }),
+              select('sequenceDemoWorkspace', { 'aria-label': i18n.t('ui.editor.demoWorkspaceSequenceLabel'), class: 'editor-code-language', value: function* () { return demoWorkspaceOrNone((yield* sequenceInput()).demoWorkspaceId); }, *change(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { demoWorkspaceId: eventValue(event) }); } }, [
+                option({ value: 'none' }, i18n.t('ui.editor.demoWorkspaceNone')),
+                forNode(demoWorkspaceConfigList, { track: (config) => config.id }, (configInput) => option({ value: function* () { return (yield* configInput()).id; } }, function* () { return (yield* configInput()).title; })),
+              ]),
               textarea('sequenceMessage', { 'aria-label': i18n.t('ui.editor.sequenceMessageLabel'), class: 'editor-sequence-message', value: function* () { return (yield* sequenceInput()).message; }, *input(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { message: eventValue(event) }); } }),
               textarea('sequenceNotes', { 'aria-label': i18n.t('ui.editor.notesPlaceholder'), class: 'editor-notes-input', placeholder: i18n.t('ui.editor.notesPlaceholder'), value: function* () { return (yield* sequenceInput()).notes; }, *input(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { notes: eventValue(event) }); } }),
               textarea('sequenceCode', { 'aria-label': i18n.t('ui.editor.codeLabel'), class: 'editor-code-input', placeholder: i18n.t('ui.editor.codePlaceholder'), value: function* () { return (yield* sequenceInput()).code; }, *input(event) { const section = (yield* sectionViewInput()).section; const sequence = yield* sequenceInput(); yield* updateSequence(section.id, sequence.id, { code: eventValue(event) }); } }),

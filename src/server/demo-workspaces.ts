@@ -5,9 +5,9 @@ import type {
   PresentationDemoWorkspace,
   PresentationDemoWorkspaceFile,
   PresentationDemoWorkspaceId,
-} from '../shared/presentation';
+} from '../shared/presentation.ts';
+import { readDemoWorkspaceConfig } from './demo-workspace-registry.ts';
 
-const stackblitzRoot = resolve(import.meta.dirname, '../../../stackblitz');
 const MAX_FILES = 80;
 const MAX_FILE_BYTES = 180_000;
 const IGNORED_DIRECTORIES = new Set(['.git', '.angular', 'dist', 'node_modules']);
@@ -23,18 +23,18 @@ function languageForFile(path: string): PresentationCodeLanguage {
   }
 }
 
-function collectFiles(directory: string, files: PresentationDemoWorkspaceFile[]): void {
+function collectFiles(directory: string, root: string, files: PresentationDemoWorkspaceFile[]): void {
   if (files.length >= MAX_FILES) return;
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
     if (files.length >= MAX_FILES) return;
     if (entry.isDirectory()) {
-      if (!IGNORED_DIRECTORIES.has(entry.name)) collectFiles(resolve(directory, entry.name), files);
+      if (!IGNORED_DIRECTORIES.has(entry.name)) collectFiles(resolve(directory, entry.name), root, files);
       continue;
     }
     const filePath = resolve(directory, entry.name);
     if (!ALLOWED_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
     if (statSync(filePath).size > MAX_FILE_BYTES) continue;
-    const relativePath = relative(stackblitzRoot, filePath).split(sep).join('/');
+    const relativePath = relative(root, filePath).split(sep).join('/');
     files.push({
       path: relativePath,
       language: languageForFile(relativePath),
@@ -44,12 +44,13 @@ function collectFiles(directory: string, files: PresentationDemoWorkspaceFile[])
 }
 
 export function readDemoWorkspace(id: PresentationDemoWorkspaceId): PresentationDemoWorkspace {
-  if (id !== 'angular-route-resources') return { id: 'none', title: '', files: [] };
+  const config = readDemoWorkspaceConfig(id);
+  if (!config) return { id: 'none', title: '', files: [] };
   const files: PresentationDemoWorkspaceFile[] = [];
-  collectFiles(stackblitzRoot, files);
+  collectFiles(config.directory, config.directory, files);
   return {
     id,
-    title: 'Démo Angular Route Resources',
+    title: config.title,
     files,
   };
 }

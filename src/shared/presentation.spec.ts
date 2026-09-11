@@ -120,4 +120,32 @@ const answer = 42;
     expect(result.document?.sections[1]?.sequences[0]?.code).toContain('flatMap');
     expect(result.document?.sections[0]?.sequences[0]?.notes).toContain('situation');
   });
+
+  it('round-trips demo projects at presentation, part and sequence scope', () => {
+    const source = formatPresentationAsMarkdown({
+      ...DEFAULT_PRESENTATION,
+      id: 'demo',
+      demoWorkspaceId: 'default-demo',
+      sections: DEFAULT_PRESENTATION.sections.map((section, sectionIndex) => ({
+        ...section,
+        demoWorkspaceId: sectionIndex === 0 ? 'part-demo' : 'none',
+        sequences: section.sequences.map((sequence, sequenceIndex) => ({
+          ...sequence,
+          demoWorkspaceId: sectionIndex === 0 && sequenceIndex === 0 ? 'sequence-demo' : 'none',
+        })),
+      })),
+    });
+    const result = parsePresentationMarkdown(source, {
+      ...DEFAULT_PRESENTATION,
+      id: 'demo',
+      updatedAt: '',
+      durationMinutes: 7,
+      sectionCount: 2,
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.document?.demoWorkspaceId).toBe('default-demo');
+    expect(result.document?.sections[0]?.demoWorkspaceId).toBe('part-demo');
+    expect(result.document?.sections[0]?.sequences[0]?.demoWorkspaceId).toBe('sequence-demo');
+  });
 });

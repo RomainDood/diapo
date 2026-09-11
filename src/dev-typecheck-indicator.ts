@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-/* eslint-disable craft-ts/prefer-browser-boundaries, craft-ts/no-direct-temporal-globals, craft-ts/prefer-craft-http-transport, craft-ts/no-async-await -- Dev-server bootstrap adapter, intentionally outside the Craft component tree. */
+/* eslint-disable craft-ts/prefer-browser-boundaries, craft-ts/prefer-craft-http-transport, craft-ts/no-async-await -- Dev-server bootstrap adapter, intentionally outside the Craft component tree. */
 export function startCraftTypecheckIndicator(): void {
   if (!import.meta.env.DEV) return;
 

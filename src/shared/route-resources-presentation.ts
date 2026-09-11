@@ -2,7 +2,7 @@ import {
   PRESENTATION_DECORATION_DEFAULT_COLOR,
   PRESENTATION_THEME_GRADIENTS,
   type PresentationStoreInput,
-} from './presentation';
+} from './presentation.ts';
 
 const localDemo = (path: string): string => `http://localhost:4200${path}`;
 

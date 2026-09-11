@@ -8,7 +8,6 @@ import {
   type CreatePresentationInput,
   type PresentationDocument,
   PRESENTATION_CODE_LANGUAGES,
-  PRESENTATION_DEMO_WORKSPACES,
   PRESENTATION_LAYOUTS,
   PRESENTATION_INTENTIONS,
   type PresentationSection,
@@ -26,8 +25,8 @@ import {
   type PresentationCodeLanguage,
   type PresentationIntention,
   type PresentationTransition,
-} from '../shared/presentation';
-import { ROUTE_RESOURCES_PRESENTATION } from '../shared/route-resources-presentation';
+} from '../shared/presentation.ts';
+import { ROUTE_RESOURCES_PRESENTATION } from '../shared/route-resources-presentation.ts';
 
 export class PresentationStoreError extends Data.TaggedError('PresentationStoreError')<{
   readonly message: string;
@@ -72,6 +71,7 @@ type SectionRow = {
   id: string;
   title: string;
   intention: string;
+  demo_workspace: string;
   sequence_id: string;
   sequence_title: string;
   message: string;
@@ -82,6 +82,7 @@ type SectionRow = {
   code_language: string;
   image_url: string;
   image_alt: string;
+  sequence_demo_workspace: string;
 };
 
 type SummaryRow = {
@@ -135,9 +136,7 @@ function presentationLayout(value: string): PresentationStoreInput['layout'] {
 }
 
 function presentationDemoWorkspace(value: string): PresentationStoreInput['demoWorkspaceId'] {
-  return PRESENTATION_DEMO_WORKSPACES.includes(value as PresentationStoreInput['demoWorkspaceId'])
-    ? value as PresentationStoreInput['demoWorkspaceId']
-    : 'none';
+  return value === 'none' || /^[a-z0-9][a-z0-9-]{1,63}$/.test(value) ? value : 'none';
 }
 
 function presentationBackgroundType(value: string): PresentationBackgroundType {
@@ -177,6 +176,7 @@ function groupSections(rows: readonly SectionRow[]): readonly PresentationSectio
       id: row.id,
       title: row.title,
       intention: presentationIntention(row.intention),
+      demoWorkspaceId: presentationDemoWorkspace(row.demo_workspace),
       sequences: [],
     };
     sections.set(row.id, {
@@ -194,6 +194,7 @@ function groupSections(rows: readonly SectionRow[]): readonly PresentationSectio
           codeLanguage: presentationCodeLanguage(row.code_language),
           imageUrl: row.image_url ?? '',
           imageAlt: row.image_alt ?? '',
+          demoWorkspaceId: presentationDemoWorkspace(row.sequence_demo_workspace),
         },
       ],
     });
@@ -233,7 +234,8 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       presentation_id TEXT NOT NULL REFERENCES presentations(id) ON DELETE CASCADE,
       position INTEGER NOT NULL,
       title TEXT NOT NULL,
-      intention TEXT NOT NULL
+      intention TEXT NOT NULL,
+      demo_workspace TEXT NOT NULL DEFAULT 'none'
     );
     CREATE TABLE IF NOT EXISTS sequences (
       id TEXT PRIMARY KEY,
@@ -243,7 +245,8 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       message TEXT NOT NULL,
       notes TEXT NOT NULL,
       duration_minutes INTEGER NOT NULL DEFAULT 1,
-      transition TEXT NOT NULL DEFAULT 'Fondu'
+      transition TEXT NOT NULL DEFAULT 'Fondu',
+      demo_workspace TEXT NOT NULL DEFAULT 'none'
     );
   `);
 
@@ -273,10 +276,13 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
 
   const sequenceColumns = database.prepare('PRAGMA table_info(sequences)').all() as readonly { name: string }[];
   const sequenceColumnNames = new Set(sequenceColumns.map((column) => column.name));
+  const sectionColumns = database.prepare('PRAGMA table_info(sections)').all() as readonly { name: string }[];
+  if (!sectionColumns.some((column) => column.name === 'demo_workspace')) database.exec("ALTER TABLE sections ADD COLUMN demo_workspace TEXT NOT NULL DEFAULT 'none'");
   if (!sequenceColumnNames.has('code')) database.exec("ALTER TABLE sequences ADD COLUMN code TEXT NOT NULL DEFAULT ''");
   if (!sequenceColumnNames.has('code_language')) database.exec("ALTER TABLE sequences ADD COLUMN code_language TEXT NOT NULL DEFAULT 'typescript'");
   if (!sequenceColumnNames.has('image_url')) database.exec("ALTER TABLE sequences ADD COLUMN image_url TEXT NOT NULL DEFAULT ''");
   if (!sequenceColumnNames.has('image_alt')) database.exec("ALTER TABLE sequences ADD COLUMN image_alt TEXT NOT NULL DEFAULT ''");
+  if (!sequenceColumnNames.has('demo_workspace')) database.exec("ALTER TABLE sequences ADD COLUMN demo_workspace TEXT NOT NULL DEFAULT 'none'");
   database.prepare("UPDATE sequences SET code = ?, code_language = ? WHERE id = 'sequence-solution' AND code = ''").run(
     'const audience = presentation.sections.flatMap((section) => section.sequences);',
     'typescript',
@@ -287,12 +293,12 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
      VALUES (@id, @title, @audience, @objective, @layout, @demoWorkspaceId, @backgroundType, @backgroundTheme, @backgroundUrl, @backgroundGradientStart, @backgroundGradientMiddle, @backgroundGradientEnd, @backgroundGradientAngle, @backgroundDecoration, @backgroundDecorationColor, @coverImageUrl, @coverImageAlt, @durationMinutes, @createdAt, @updatedAt)`,
   );
   const insertSection = database.prepare(
-    `INSERT INTO sections (id, presentation_id, position, title, intention)
-     VALUES (@id, @presentationId, @position, @title, @intention)`,
+    `INSERT INTO sections (id, presentation_id, position, title, intention, demo_workspace)
+     VALUES (@id, @presentationId, @position, @title, @intention, @demoWorkspaceId)`,
   );
   const insertSequence = database.prepare(
-    `INSERT INTO sequences (id, section_id, position, title, message, notes, duration_minutes, transition, code, code_language, image_url, image_alt)
-     VALUES (@id, @sectionId, @position, @title, @message, @notes, @durationMinutes, @transition, @code, @codeLanguage, @imageUrl, @imageAlt)`,
+    `INSERT INTO sequences (id, section_id, position, title, message, notes, duration_minutes, transition, code, code_language, image_url, image_alt, demo_workspace)
+     VALUES (@id, @sectionId, @position, @title, @message, @notes, @durationMinutes, @transition, @code, @codeLanguage, @imageUrl, @imageAlt, @demoWorkspaceId)`,
   );
 
   const seedDocument = (id: string, input: PresentationStoreInput): void => {
@@ -321,7 +327,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
       updatedAt: now,
     });
     input.sections.forEach((section, sectionIndex) => {
-      insertSection.run({ id: section.id, presentationId: id, position: sectionIndex, title: section.title, intention: section.intention });
+      insertSection.run({ id: section.id, presentationId: id, position: sectionIndex, title: section.title, intention: section.intention, demoWorkspaceId: section.demoWorkspaceId ?? 'none' });
       section.sequences.forEach((sequence, sequenceIndex) => {
         insertSequence.run({
           id: sequence.id,
@@ -336,6 +342,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
           codeLanguage: sequence.codeLanguage,
           imageUrl: sequence.imageUrl,
           imageAlt: sequence.imageAlt,
+          demoWorkspaceId: sequence.demoWorkspaceId ?? 'none',
         });
       });
     });
@@ -355,6 +362,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
         position: sectionIndex,
         title: section.title,
         intention: section.intention,
+        demoWorkspaceId: section.demoWorkspaceId ?? 'none',
       });
       section.sequences.forEach((sequence, sequenceIndex) => {
         insertSequence.run({
@@ -370,6 +378,7 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
           codeLanguage: sequence.codeLanguage,
           imageUrl: sequence.imageUrl,
           imageAlt: sequence.imageAlt,
+          demoWorkspaceId: sequence.demoWorkspaceId ?? 'none',
         });
       });
     });
@@ -379,9 +388,10 @@ function createDatabaseStore(databasePath: string): PresentationStoreShape {
     const presentation = database.prepare('SELECT * FROM presentations WHERE id = ?').get(id) as PresentationRow | undefined;
     if (!presentation) throw new Error(`Presentation ${id} not found`);
     const rows = database.prepare(
-      `SELECT s.id, s.title, s.intention, q.id AS sequence_id, q.title AS sequence_title,
+      `SELECT s.id, s.title, s.intention, s.demo_workspace, q.id AS sequence_id, q.title AS sequence_title,
               q.message, q.notes, q.duration_minutes, q.transition,
-              q.code, q.code_language, q.image_url, q.image_alt
+              q.code, q.code_language, q.image_url, q.image_alt,
+              q.demo_workspace AS sequence_demo_workspace
        FROM sections s
        LEFT JOIN sequences q ON q.section_id = s.id
        WHERE s.presentation_id = ?

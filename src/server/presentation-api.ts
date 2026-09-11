@@ -3,10 +3,9 @@ import {
   createPresentationRuntime,
   PresentationStore,
   PresentationStoreError,
-} from './presentation-store';
+} from './presentation-store.ts';
 import {
   PRESENTATION_CODE_LANGUAGES,
-  PRESENTATION_DEMO_WORKSPACES,
   PRESENTATION_INTENTIONS,
   PRESENTATION_LAYOUTS,
   PRESENTATION_TRANSITIONS,
@@ -15,12 +14,12 @@ import {
   PRESENTATION_THEME_GRADIENTS,
   PRESENTATION_DECORATIONS,
   PRESENTATION_DECORATION_DEFAULT_COLOR,
-} from '../shared/presentation';
+} from '../shared/presentation.ts';
 import type {
   CreatePresentationInput,
   PresentationSection,
   PresentationStoreInput,
-} from '../shared/presentation';
+} from '../shared/presentation.ts';
 
 export type PresentationApiResponse = {
   readonly status: number;
@@ -49,8 +48,8 @@ function readStoreInput(value: unknown): PresentationStoreInput | undefined {
     layout: PRESENTATION_LAYOUTS.includes(value.layout as (typeof PRESENTATION_LAYOUTS)[number])
       ? value.layout as (typeof PRESENTATION_LAYOUTS)[number]
       : 'desktop',
-    demoWorkspaceId: PRESENTATION_DEMO_WORKSPACES.includes(value.demoWorkspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number])
-      ? value.demoWorkspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number]
+    demoWorkspaceId: typeof value.demoWorkspaceId === 'string' && (value.demoWorkspaceId === 'none' || /^[a-z0-9][a-z0-9-]{1,63}$/.test(value.demoWorkspaceId))
+      ? value.demoWorkspaceId
       : 'none',
     backgroundType: PRESENTATION_BACKGROUND_TYPES.includes(value.backgroundType as (typeof PRESENTATION_BACKGROUND_TYPES)[number])
       ? value.backgroundType as (typeof PRESENTATION_BACKGROUND_TYPES)[number]

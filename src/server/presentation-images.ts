@@ -7,7 +7,7 @@ import {
   type PresentationMediaMimeType,
   type PresentationImageUpload,
   type PresentationImageUploadInput,
-} from '../shared/presentation';
+} from '../shared/presentation.ts';
 
 const EXTENSIONS: Record<PresentationMediaMimeType, string> = {
   'image/jpeg': '.jpg',

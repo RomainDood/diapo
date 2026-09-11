@@ -343,7 +343,6 @@ test('opens the live code workspace from presenter notes', async ({ page }) => {
   });
   expect(movedShortcutsPosition).not.toEqual(initialShortcutsPosition);
   const workspaceBody = page.locator('.presentation-code-workspace__body');
-  const workspaceEditor = page.locator('.presentation-code-workspace__editor');
   const workspaceCode = page.locator('.presentation-code--workspace');
   await expect(workspaceBody).toHaveAttribute('data-files-visible', 'true');
   await page.getByRole('button', { name: 'Hide files' }).click();
@@ -368,6 +367,80 @@ test('opens the live code workspace from presenter notes', async ({ page }) => {
   await page.getByRole('button', { name: 'Back to presentation' }).click();
   await expect(page.locator('.presentation-code-workspace')).toHaveCount(0);
   await expect(page.getByText('1 / 8')).toBeVisible();
+});
+
+test('starts the local Angular demo from the presenter terminal', async ({ page }) => {
+  let processState: 'stopped' | 'running' = 'stopped';
+  let terminalLogs: string[] = [];
+  await page.route('**/api/demo-workspaces/angular-route-resources/process', async (route) => {
+    if (route.request().method() === 'POST') processState = 'running';
+    if (route.request().method() === 'DELETE') processState = 'stopped';
+    await route.fulfill({
+      status: route.request().method() === 'GET' ? 200 : 202,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'angular-route-resources',
+        state: processState,
+        terminalState: 'idle',
+        url: 'http://127.0.0.1:4200',
+        command: 'pnpm start -- --host 127.0.0.1 --port 4200',
+        terminalCommand: terminalLogs.length > 0 ? 'node -v' : '',
+        runtime: 'v22.23.0',
+        logs: [...(processState === 'running' ? ['$ pnpm start', 'Local: http://127.0.0.1:4200/'] : []), ...terminalLogs],
+      }),
+    });
+  });
+  await page.route('**/api/demo-workspaces/angular-route-resources/terminal', async (route) => {
+    terminalLogs = ['$ node -v', 'v22.23.0'];
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'angular-route-resources',
+        state: processState,
+        terminalState: 'idle',
+        url: 'http://127.0.0.1:4200',
+        command: 'pnpm start -- --host 127.0.0.1 --port 4200',
+        terminalCommand: 'node -v',
+        runtime: 'v22.23.0',
+        logs: [...(processState === 'running' ? ['$ pnpm start', 'Local: http://127.0.0.1:4200/'] : []), ...terminalLogs],
+      }),
+    });
+  });
+
+  await page.goto('/presenter/presentation-angular-route-resources');
+  await page.getByRole('button', { name: /Open part/ }).first().click();
+  await page.getByRole('button', { name: 'Speaker notes' }).click();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+
+  const terminal = page.getByRole('region', { name: 'Local demo terminal' });
+  await expect(terminal).toBeVisible();
+  await expect(terminal).toContainText('pnpm start -- --host 127.0.0.1 --port 4200');
+  await expect(terminal.locator('.presentation-demo-terminal__status')).toHaveAttribute('data-status', 'stopped');
+
+  const startResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/demo-workspaces/angular-route-resources/process') && response.request().method() === 'POST',
+  );
+  await terminal.getByRole('button', { name: 'Start demo' }).click();
+  await startResponse;
+  await expect(terminal.locator('.presentation-demo-terminal__status')).toHaveAttribute('data-status', 'running');
+  await expect(terminal).toContainText('Local: http://127.0.0.1:4200/');
+  await expect(terminal.getByRole('link', { name: 'Open demo' })).toBeVisible();
+
+  const commandResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/demo-workspaces/angular-route-resources/terminal') && response.request().method() === 'POST',
+  );
+  await terminal.getByRole('textbox', { name: 'Run a command in the demo workspace…' }).fill('node -v');
+  await terminal.getByRole('textbox', { name: 'Run a command in the demo workspace…' }).press('Enter');
+  await commandResponse;
+  await expect(terminal).toContainText('v22.23.0');
+
+  const stopResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/demo-workspaces/angular-route-resources/process') && response.request().method() === 'DELETE',
+  );
+  await terminal.getByRole('button', { name: 'Stop' }).click();
+  await stopResponse;
+  await expect(terminal.locator('.presentation-demo-terminal__status')).toHaveAttribute('data-status', 'stopped');
 });
 
 test('draws temporary annotations on a presentation slide', async ({ page }) => {

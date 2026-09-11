@@ -4,18 +4,19 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { defineConfig, type ViteDevServer } from 'vite';
 import { craftStyle } from '@craft-ts/style/vite';
-import { createPresentationApi } from './src/server/presentation-api';
+import { createPresentationApi } from './src/server/presentation-api.ts';
 import {
   createPresentationImageStore,
   PresentationImageError,
-} from './src/server/presentation-images';
+} from './src/server/presentation-images.ts';
 import {
   PRESENTATION_MEDIA_MIME_TYPES,
   type PresentationMediaMimeType,
   type PresentationImageUploadInput,
-} from './src/shared/presentation';
-import { PRESENTATION_DEMO_WORKSPACES } from './src/shared/presentation';
-import { readDemoWorkspace } from './src/server/demo-workspaces';
+} from './src/shared/presentation.ts';
+import { readDemoWorkspace } from './src/server/demo-workspaces.ts';
+import { readDemoWorkspaceConfig, readDemoWorkspaceConfigs, saveDemoWorkspaceConfig } from './src/server/demo-workspace-registry.ts';
+import { DemoWorkspaceProcessManager } from './src/server/demo-workspace-process.ts';
 
 const typecheckStatusPath = new URL('./.craft/typecheck-status.json', import.meta.url);
 const starterPort = Number(process.env.CRAFT_STARTER_PORT ?? 4173);
@@ -157,23 +158,88 @@ function presentationApiPlugin() {
 }
 
 function demoWorkspacePlugin() {
+  const processManager = new DemoWorkspaceProcessManager();
   return {
     name: 'demo-workspaces',
     configureServer(server: ViteDevServer) {
+      server.httpServer?.once('close', () => processManager.stopAll());
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+        if (pathname === '/api/demo-workspaces') {
+          if (request.method === 'GET') {
+            sendJson(response, 200, readDemoWorkspaceConfigs());
+            return;
+          }
+          if (request.method === 'POST') {
+            void readJsonBody(request).then((body) => {
+              try {
+                sendJson(response, 201, saveDemoWorkspaceConfig(body));
+              } catch (error: unknown) {
+                sendJson(response, 400, { error: error instanceof Error ? error.message : 'Invalid demo workspace.' });
+              }
+            });
+            return;
+          }
+          sendJson(response, 405, { error: 'Method not allowed.' });
+          return;
+        }
+        const processMatch = pathname.match(/^\/api\/demo-workspaces\/([^/]+)\/process$/);
+        if (processMatch?.[1]) {
+          const workspaceId = decodeURIComponent(processMatch[1]);
+          if (!readDemoWorkspaceConfig(workspaceId)) {
+            sendJson(response, 404, { error: 'Demo workspace not found.' });
+            return;
+          }
+          if (request.method === 'GET') {
+            sendJson(response, 200, processManager.status(workspaceId));
+            return;
+          }
+          if (request.method === 'POST') {
+            sendJson(response, 202, processManager.start(workspaceId));
+            return;
+          }
+          if (request.method === 'DELETE') {
+            sendJson(response, 202, processManager.stop(workspaceId));
+            return;
+          }
+          sendJson(response, 405, { error: 'Method not allowed.' });
+          return;
+        }
+        const terminalMatch = pathname.match(/^\/api\/demo-workspaces\/([^/]+)\/terminal$/);
+        if (terminalMatch?.[1]) {
+          const workspaceId = decodeURIComponent(terminalMatch[1]);
+          if (!readDemoWorkspaceConfig(workspaceId)) {
+            sendJson(response, 404, { error: 'Demo workspace not found.' });
+            return;
+          }
+          if (request.method !== 'POST') {
+            sendJson(response, 405, { error: 'Method not allowed.' });
+            return;
+          }
+          void readJsonBody(request).then((body) => {
+            const command = body && typeof body === 'object' && typeof (body as { command?: unknown }).command === 'string'
+              ? (body as { command: string }).command.trim()
+              : '';
+            if (!command || command.length > 160) {
+              sendJson(response, 400, { error: 'A terminal command is required.' });
+              return;
+            }
+            sendJson(response, 202, processManager.runCommand(workspaceId, command));
+          });
+          return;
+        }
         const match = pathname.match(/^\/api\/demo-workspaces\/([^/]+)$/);
         if (request.method !== 'GET' || !match?.[1]) {
           next();
           return;
         }
         const workspaceId = decodeURIComponent(match[1]);
-        if (!PRESENTATION_DEMO_WORKSPACES.includes(workspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number])) {
+        if (!readDemoWorkspaceConfig(workspaceId)) {
           sendJson(response, 404, { error: 'Demo workspace not found.' });
           return;
         }
         try {
-          sendJson(response, 200, readDemoWorkspace(workspaceId as (typeof PRESENTATION_DEMO_WORKSPACES)[number]));
+          sendJson(response, 200, readDemoWorkspace(workspaceId));
         } catch (error: unknown) {
           sendJson(response, 500, { error: error instanceof Error ? error.message : 'Unable to read demo workspace.' });
         }

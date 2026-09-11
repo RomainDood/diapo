@@ -1,4 +1,7 @@
-import { provideCraftRootComponent } from '@craft-ts/component';
+import {
+  provideCraftRootComponent,
+  provideSendContextToAi,
+} from "@craft-ts/component";
 import {
   craftAppConfig,
   CRAFT_SECURITY_POLICY,
@@ -6,16 +9,12 @@ import {
   provideAppInitializer,
   provideCraftDevTools,
   provideCraftRouter,
-
-} from '@craft-ts/core';
-import {
-  installCraftEffectBridge,
-  provideLayer,
-} from '@craft-ts/effect';
-import { App } from './app';
-import { appRoutes } from './app.routes';
-import { i18nLayer } from '../i18n/effect-layer';
-import { PRESENTATION_IMAGE_ALLOWED_ORIGINS } from '../shared/presentation';
+} from "@craft-ts/core";
+import { installCraftEffectBridge, provideLayer } from "@craft-ts/effect";
+import { App } from "./app";
+import { appRoutes } from "./app.routes";
+import { i18nLayer } from "../i18n/effect-layer";
+import { PRESENTATION_IMAGE_ALLOWED_ORIGINS } from "../shared/presentation";
 
 const effectProviders = provideLayer(i18nLayer);
 const developmentProviders = import.meta.env.DEV ? provideCraftDevTools() : [];
@@ -37,6 +36,7 @@ export const appConfig = craftAppConfig({
 
     effectProviders,
     provideAppInitializer(() => installCraftEffectBridge()),
+    provideSendContextToAi(),
   ],
 });
 

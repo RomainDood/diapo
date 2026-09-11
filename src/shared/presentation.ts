@@ -39,7 +39,15 @@ export const PRESENTATION_DEMO_WORKSPACES = [
   'angular-route-resources',
 ] as const;
 
-export type PresentationDemoWorkspaceId = (typeof PRESENTATION_DEMO_WORKSPACES)[number];
+export type PresentationDemoWorkspaceId = string;
+
+export type PresentationDemoWorkspaceConfig = {
+  readonly id: PresentationDemoWorkspaceId;
+  readonly title: string;
+  readonly directory: string;
+  readonly command: string;
+  readonly port: number;
+};
 
 export type PresentationDemoWorkspaceFile = {
   readonly path: string;
@@ -51,6 +59,31 @@ export type PresentationDemoWorkspace = {
   readonly id: PresentationDemoWorkspaceId;
   readonly title: string;
   readonly files: readonly PresentationDemoWorkspaceFile[];
+};
+
+export const PRESENTATION_DEMO_WORKSPACE_PROCESS_STATES = [
+  'stopped',
+  'starting',
+  'running',
+  'stopping',
+  'error',
+] as const;
+
+export type PresentationDemoWorkspaceProcessState = (typeof PRESENTATION_DEMO_WORKSPACE_PROCESS_STATES)[number];
+
+export const PRESENTATION_DEMO_WORKSPACE_TERMINAL_STATES = ['idle', 'running', 'error'] as const;
+
+export type PresentationDemoWorkspaceTerminalState = (typeof PRESENTATION_DEMO_WORKSPACE_TERMINAL_STATES)[number];
+
+export type PresentationDemoWorkspaceProcessStatus = {
+  readonly id: PresentationDemoWorkspaceId;
+  readonly state: PresentationDemoWorkspaceProcessState;
+  readonly terminalState: PresentationDemoWorkspaceTerminalState;
+  readonly url: string;
+  readonly command: string;
+  readonly terminalCommand: string;
+  readonly runtime: string;
+  readonly logs: readonly string[];
 };
 
 export const PRESENTATION_BACKGROUND_TYPES = ['theme', 'image', 'video'] as const;
@@ -140,12 +173,14 @@ export type PresentationSequence = {
   readonly codeLanguage: PresentationCodeLanguage;
   readonly imageUrl: string;
   readonly imageAlt: string;
+  readonly demoWorkspaceId?: PresentationDemoWorkspaceId;
 };
 
 export type PresentationSection = {
   readonly id: string;
   readonly title: string;
   readonly intention: string;
+  readonly demoWorkspaceId?: PresentationDemoWorkspaceId;
   readonly sequences: readonly PresentationSequence[];
 };
 
@@ -236,6 +271,11 @@ function parseMarkdownHeading(line: string, level: number, labels: readonly stri
 function parseMarkdownIntention(line: string): string | undefined {
   const match = line.match(/^\*\s*Intention\s*:?\s*\*\s*(.+?)\s*$/i);
   return match?.[1]?.trim();
+}
+
+function parseMarkdownDemoWorkspace(line: string): PresentationDemoWorkspaceId | undefined {
+  const value = parseMarkdownField(line, ['Demo', 'Projet', 'Workspace']);
+  return value?.trim() || undefined;
 }
 
 function parsePresentationCodeLanguage(value: string | undefined): PresentationCodeLanguage {
@@ -388,12 +428,20 @@ export function parsePresentationMarkdown(markdown: string, fallback: Presentati
         currentSection = { ...currentSection, intention: parsePresentationIntention(intention, currentSection.intention) };
         return;
       }
+      const demoWorkspaceId = parseMarkdownDemoWorkspace(line);
+      if (demoWorkspaceId) {
+        if (currentSequence) currentSequence = { ...currentSequence, demoWorkspaceId };
+        else currentSection = { ...currentSection, demoWorkspaceId };
+        return;
+      }
     }
     if (!currentSequence) {
       const audience = parseMarkdownField(line, ['Audience', 'Public']);
       if (audience) { values.audience = audience; return; }
       const objective = parseMarkdownField(line, ['Objective', 'Objectif']);
       if (objective) { values.objective = objective; return; }
+      const demoWorkspaceId = parseMarkdownDemoWorkspace(line);
+      if (demoWorkspaceId) { values.demoWorkspaceId = demoWorkspaceId; return; }
       return;
     }
     if (/^####\s+Notes?\s*$/i.test(line)) { mode = 'notes'; return; }
@@ -434,6 +482,7 @@ export function parsePresentationMarkdown(markdown: string, fallback: Presentati
     title,
     audience: values.audience?.trim() ?? fallback.audience,
     objective: values.objective?.trim() ?? fallback.objective,
+    demoWorkspaceId: values.demoWorkspaceId?.trim() || fallback.demoWorkspaceId,
     layout: values.layout === 'vertical' ? 'vertical' : values.layout === 'desktop' ? 'desktop' : fallback.layout,
     backgroundType: values.backgroundType === 'image' || values.backgroundType === 'video' ? values.backgroundType : fallback.backgroundType,
     backgroundTheme: PRESENTATION_THEMES.includes(values.backgroundTheme as PresentationThemeId) ? values.backgroundTheme as PresentationThemeId : fallback.backgroundTheme,
@@ -448,11 +497,14 @@ export function formatPresentationAsMarkdown(document: PresentationDocument): st
   const lines = [`# ${document.title.trim() || 'Untitled presentation'}`, ''];
   addOptionalField(lines, 'Audience', document.audience);
   addOptionalField(lines, 'Objective', document.objective);
+  addOptionalField(lines, 'Demo', document.demoWorkspaceId === 'none' ? '' : document.demoWorkspaceId);
 
   document.sections.forEach((part, partIndex) => {
     lines.push(`## Part ${partIndex + 1} — ${part.title}`, '', `*Intention :* ${part.intention}`, '');
+    addOptionalField(lines, 'Demo', part.demoWorkspaceId && part.demoWorkspaceId !== 'none' ? part.demoWorkspaceId : '');
     part.sequences.forEach((sequence, sequenceIndex) => {
       lines.push(`### Sequence ${sequenceIndex + 1} — ${sequence.title}`, '');
+      addOptionalField(lines, 'Demo', sequence.demoWorkspaceId && sequence.demoWorkspaceId !== 'none' ? sequence.demoWorkspaceId : '');
       if (sequence.message.trim()) lines.push(sequence.message.trim(), '');
       lines.push(`**Duration :** ${sequence.durationMinutes} min`, `**Transition :** ${sequence.transition}`, '');
       if (sequence.notes.trim()) lines.push('#### Notes', '', quoteNotes(sequence.notes), '');

@@ -23,11 +23,35 @@ import {
 } from '@craft-ts/component';
 import { assign, num, unit } from '@craft-ts/style';
 import type { ColorValue } from '@craft-ts/style';
-import { craftComputed, craftMethod, craftNodeDirective, query, state } from '@craft-ts/core';
+import {
+  CRAFT_TEMPORAL_RUNTIME,
+  DestroyRef,
+  craftComputed,
+  craftMethod,
+  craftNodeDirective,
+  insertQueryPipe,
+  insertReactOnMutation,
+  mutation,
+  query,
+  state,
+  type TemporalTaskHandle,
+} from '@craft-ts/core';
 import { i18n } from '../../../i18n';
-import { loadDemoWorkspace, loadPresentation } from '../../api';
+import {
+  loadDemoWorkspace,
+  loadDemoWorkspaceProcessStatus,
+  executeDemoWorkspaceCommand,
+  loadPresentation,
+  startDemoWorkspaceProcess as startDemoWorkspaceProcessRequest,
+  stopDemoWorkspaceProcess as stopDemoWorkspaceProcessRequest,
+} from '../../api';
 import { PRESENTATION_IMAGE_ALLOWED_ORIGINS, PRESENTATION_THEME_GRADIENTS } from '../../../shared/presentation';
-import type { PresentationDemoWorkspaceFile, PresentationDemoWorkspaceId, PresentationSequence } from '../../../shared/presentation';
+import type {
+  PresentationDemoWorkspaceFile,
+  PresentationDemoWorkspaceId,
+  PresentationDemoWorkspaceProcessStatus,
+  PresentationSequence,
+} from '../../../shared/presentation';
 import { highlightCodeTokens } from './code-highlighter';
 import { extractPresentationNoteParts } from './presentation-links';
 import { presentationGradientVars, presentationProgressVars, presentationSlideVars } from '../../ui/ui.style';
@@ -117,6 +141,17 @@ const EMPTY_SLIDE: PresentationSequence = {
   imageAlt: '',
 };
 
+const EMPTY_PROCESS_STATUS: PresentationDemoWorkspaceProcessStatus = {
+  id: 'none',
+  state: 'stopped',
+  terminalState: 'idle',
+  url: '',
+  command: '',
+  terminalCommand: '',
+  runtime: '',
+  logs: [],
+};
+
 type PresentationImageViewer = {
   url: string;
   alt: string;
@@ -159,6 +194,30 @@ const focusCodeWorkspaceInput = craftNodeDirective(
         element.select();
       }
     });
+  },
+);
+
+const pollDemoWorkspaceProcess = craftNodeDirective(
+  'pollDemoWorkspaceProcess',
+  [],
+  (context) => {
+    const temporalRuntime = context.injector.get(CRAFT_TEMPORAL_RUNTIME);
+    const destroyRef = context.injector.get(DestroyRef);
+    let task: TemporalTaskHandle | undefined;
+    let disposed = false;
+    const schedule = () => {
+      if (disposed) return;
+      task = temporalRuntime.schedule(() => {
+        if (disposed) return;
+        context.element.dispatchEvent(new Event('demoWorkspaceProcessRefresh'));
+        schedule();
+      }, 1_200, { kind: 'demo-process-poll', owner: 'presentation-demo-terminal', destroyRef });
+    };
+    schedule();
+    return () => {
+      disposed = true;
+      task?.cancel();
+    };
   },
 );
 
@@ -622,6 +681,13 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         open: (value: ActiveCodeWorkspace) => set(value),
         close: () => set(null),
       }));
+      const terminalVisible = yield* state('terminalVisible', false, ({ set }) => ({
+        show: () => set(true),
+        hide: () => set(false),
+      }));
+      const terminalCommand = yield* state('terminalCommand', '', ({ set }) => ({
+        setCommand: (value: string) => set(value),
+      }));
       const codeFilesVisible = yield* state('codeFilesVisible', true, ({ set }) => ({
         show: () => set(true),
         hide: () => set(false),
@@ -671,14 +737,59 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       const showStage = craftComputed('showStage', function* () {
         return !(yield* overview());
       });
+      const activeDemoWorkspaceId = craftComputed('activeDemoWorkspaceId', function* () {
+        const document = yield* presentation.value();
+        if (!document) return 'none';
+        const slides = document.sections.flatMap((section) => section.sequences.map((sequence) => ({ section, sequence })));
+        const active = slides[yield* slideIndex()];
+        return active?.sequence.demoWorkspaceId && active.sequence.demoWorkspaceId !== 'none'
+          ? active.sequence.demoWorkspaceId
+          : active?.section.demoWorkspaceId && active.section.demoWorkspaceId !== 'none'
+            ? active.section.demoWorkspaceId
+            : document.demoWorkspaceId;
+      });
       const demoWorkspace = yield* query('presentationDemoWorkspace', {
         params: function* () {
-          return (yield* presentation.value())?.demoWorkspaceId ?? 'none';
+          return yield* activeDemoWorkspaceId();
         },
         loader: function* ({ params }) {
           return yield* loadDemoWorkspace(params);
         },
       });
+      const startDemoWorkspace = yield* mutation('startDemoWorkspaceProcess', {
+        method: (id: PresentationDemoWorkspaceId) => id,
+        loader: function* ({ params }) {
+          return yield* startDemoWorkspaceProcessRequest(params);
+        },
+      });
+      const stopDemoWorkspace = yield* mutation('stopDemoWorkspaceProcess', {
+        method: (id: PresentationDemoWorkspaceId) => id,
+        loader: function* ({ params }) {
+          return yield* stopDemoWorkspaceProcessRequest(params);
+        },
+      });
+      const runDemoWorkspaceCommand = yield* mutation('runDemoWorkspaceCommand', {
+        method: (input: { readonly id: PresentationDemoWorkspaceId; readonly command: string }) => input,
+        loader: function* ({ params }) {
+          return yield* executeDemoWorkspaceCommand(params.id, params.command);
+        },
+      });
+      const demoWorkspaceProcessStatus = yield* query(
+        'demoWorkspaceProcessStatus',
+        {
+          params: function* () {
+            return yield* activeDemoWorkspaceId();
+          },
+          loader: function* ({ params }) {
+            return yield* loadDemoWorkspaceProcessStatus(params);
+          },
+        },
+        insertQueryPipe(
+          insertReactOnMutation(startDemoWorkspace, { reload: { onMutationResolved: true } }),
+          insertReactOnMutation(stopDemoWorkspace, { reload: { onMutationResolved: true } }),
+          insertReactOnMutation(runDemoWorkspaceCommand, { reload: { onMutationResolved: true } }),
+        ),
+      );
       const hasImageViewer = craftComputed('hasImageViewer', function* () {
         return Boolean(yield* imageViewer());
       });
@@ -736,6 +847,31 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       });
       const hasDemoWorkspace = craftComputed('hasDemoWorkspace', function* () {
         return (yield* demoWorkspace.value())?.id !== 'none';
+      });
+      const processStatus = craftComputed('processStatus', function* () {
+        return (yield* demoWorkspaceProcessStatus.value()) ?? EMPTY_PROCESS_STATUS;
+      });
+      const processStatusLabel = craftComputed('processStatusLabel', function* () {
+        const status = yield* processStatus();
+        if (status.state === 'starting') return i18n.t('ui.presentation.demoStarting');
+        if (status.state === 'running') return i18n.t('ui.presentation.demoRunning');
+        if (status.state === 'stopping') return i18n.t('ui.presentation.demoStopping');
+        if (status.state === 'error') return i18n.t('ui.presentation.demoError');
+        return i18n.t('ui.presentation.demoStopped');
+      });
+      const processIsRunning = craftComputed('processIsRunning', function* () {
+        return (yield* processStatus()).state === 'running';
+      });
+      const processIsBusy = craftComputed('processIsBusy', function* () {
+        const status = (yield* processStatus()).state;
+        return status === 'starting' || status === 'stopping';
+      });
+      const terminalIsBusy = craftComputed('terminalIsBusy', function* () {
+        return (yield* processStatus()).terminalState === 'running';
+      });
+      const processUrl = craftComputed('processUrl', function* () {
+        const status = yield* processStatus();
+        return safePresentationLinkUrl(status.url);
       });
       const showOverviewContent = craftComputed('showOverviewContent', function* () {
         return !(yield* hasActiveLink()) && !(yield* hasActiveCodeWorkspace());
@@ -890,15 +1026,55 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         }
       });
       const openCodeWorkspace = craftMethod('openCodeWorkspace', function* () {
-        const workspaceId = (yield* presentation.value())?.demoWorkspaceId ?? 'none';
+        const workspaceId = yield* activeDemoWorkspaceId();
         if (workspaceId === 'none') return;
         yield* linkReturnState.remember(yield* overview());
         yield* overview.show();
         yield* activeLink.close();
         yield* activeCodeWorkspace.open({ id: workspaceId });
+        yield* terminalVisible.hide();
+      });
+      const openDemoTerminal = craftMethod('openDemoTerminal', function* () {
+        const workspaceId = yield* activeDemoWorkspaceId();
+        if (workspaceId === 'none') return;
+        yield* linkReturnState.remember(yield* overview());
+        yield* overview.show();
+        yield* activeLink.close();
+        yield* activeCodeWorkspace.open({ id: workspaceId });
+        yield* terminalVisible.show();
+        yield* codeFilesVisible.hide();
+        yield* demoWorkspaceProcessStatus.resource.reload();
+      });
+      const toggleDemoTerminal = craftMethod('toggleDemoTerminal', function* () {
+        if (yield* terminalVisible()) yield* terminalVisible.hide();
+        else {
+          yield* terminalVisible.show();
+          yield* codeFilesVisible.hide();
+          yield* demoWorkspaceProcessStatus.resource.reload();
+        }
+      });
+      const refreshDemoWorkspaceProcess = craftMethod('refreshDemoWorkspaceProcess', function* () {
+        yield* demoWorkspaceProcessStatus.resource.reload();
+      });
+      const startDemoWorkspaceProcess = craftMethod('startDemoWorkspaceProcess', function* () {
+        const workspaceId = yield* activeDemoWorkspaceId();
+        if (workspaceId === 'none') return;
+        yield* startDemoWorkspace.mutate(workspaceId);
+      });
+      const stopDemoWorkspaceProcess = craftMethod('stopDemoWorkspaceProcess', function* () {
+        const workspaceId = yield* activeDemoWorkspaceId();
+        if (workspaceId === 'none') return;
+        yield* stopDemoWorkspace.mutate(workspaceId);
+      });
+      const runDemoCommand = craftMethod('runDemoCommand', function* () {
+        const workspaceId = yield* activeDemoWorkspaceId();
+        const command = (yield* terminalCommand()).trim();
+        if (workspaceId === 'none' || !command || (yield* terminalIsBusy())) return;
+        yield* runDemoWorkspaceCommand.mutate({ id: workspaceId, command });
       });
       const closeCodeWorkspace = craftMethod('closeCodeWorkspace', function* () {
         yield* activeCodeWorkspace.close();
+        yield* terminalVisible.hide();
         yield* codeQuickOpenVisible.hide();
         yield* codeSearchVisible.hide();
         yield* codeFileQuery.setQuery('');
@@ -915,13 +1091,13 @@ function createPresentationPage(name: string, presenterMode: boolean) {
         if (!(yield* linkReturnState())) yield* overview.hide();
         yield* linkReturnState.clear();
       });
-      return { presentation, demoWorkspace, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, hasActiveCodeWorkspace, hasDemoWorkspace, showOverviewContent, activeLink, activeCodeWorkspace, codeFilesVisible, codeQuickOpenVisible, codeFileQuery, codeSearchVisible, codeSearchQuery, selectedCodePath, visibleWorkspaceFiles, selectedWorkspaceFile, highlightedWorkspaceCode, workspaceSearchMatches, codeFileListVisible, noWorkspaceFiles, imageViewer, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, toggleCodeFiles, openPresentationLink, closePresentationLink, openCodeWorkspace, closeCodeWorkspace, selectCodeFile, openImageViewer, closeImageViewer, presentationId };
+      return { presentation, demoWorkspace, demoWorkspaceProcessStatus, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, hasActiveCodeWorkspace, hasDemoWorkspace, activeDemoWorkspaceId, processStatus, processStatusLabel, processIsRunning, processIsBusy, terminalIsBusy, processUrl, terminalVisible, terminalCommand, showOverviewContent, activeLink, activeCodeWorkspace, codeFilesVisible, codeQuickOpenVisible, codeFileQuery, codeSearchVisible, codeSearchQuery, selectedCodePath, visibleWorkspaceFiles, selectedWorkspaceFile, highlightedWorkspaceCode, workspaceSearchMatches, codeFileListVisible, noWorkspaceFiles, imageViewer, slideItems, next, previous, handleKeydown, selectSlide, toggleNotes, toggleCodeFiles, openPresentationLink, closePresentationLink, openCodeWorkspace, openDemoTerminal, toggleDemoTerminal, refreshDemoWorkspaceProcess, startDemoWorkspaceProcess, stopDemoWorkspaceProcess, runDemoCommand, closeCodeWorkspace, selectCodeFile, openImageViewer, closeImageViewer, presentationId };
     },
-    ({ presentation, demoWorkspace, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, hasActiveCodeWorkspace, hasDemoWorkspace, showOverviewContent, activeLink, codeFilesVisible, codeQuickOpenVisible, codeFileQuery, codeSearchVisible, codeSearchQuery, visibleWorkspaceFiles, selectedWorkspaceFile, highlightedWorkspaceCode, workspaceSearchMatches, codeFileListVisible, noWorkspaceFiles, imageViewer, slideItems, next, previous, selectSlide, toggleNotes, toggleCodeFiles, openPresentationLink, closePresentationLink, openCodeWorkspace, closeCodeWorkspace, selectCodeFile, openImageViewer, closeImageViewer, handleKeydown, presentationId }) =>
+    ({ presentation, demoWorkspace, demoWorkspaceProcessStatus, overview, hasCoverImage, hasBackgroundImage, hasBackgroundVideo, showStage, hasImageViewer, slideIndex, slides, sectionNavigation, currentSlide, currentSectionTitle, currentSectionIntention, progressPercent, showNotes, hasImage, hasCode, highlightedCode, noteParts, hasActiveLink, hasActiveCodeWorkspace, hasDemoWorkspace, processStatus, processStatusLabel, processIsRunning, processIsBusy, terminalIsBusy, processUrl, terminalVisible, terminalCommand, showOverviewContent, activeLink, codeFilesVisible, codeQuickOpenVisible, codeFileQuery, codeSearchVisible, codeSearchQuery, visibleWorkspaceFiles, selectedWorkspaceFile, highlightedWorkspaceCode, workspaceSearchMatches, codeFileListVisible, noWorkspaceFiles, imageViewer, slideItems, next, previous, selectSlide, toggleNotes, toggleCodeFiles, openPresentationLink, closePresentationLink, openCodeWorkspace, openDemoTerminal, toggleDemoTerminal, refreshDemoWorkspaceProcess, startDemoWorkspaceProcess, stopDemoWorkspaceProcess, runDemoCommand, closeCodeWorkspace, selectCodeFile, openImageViewer, closeImageViewer, handleKeydown, presentationId }) =>
       div({ class: 'presentation-shell', 'data-layout': function* () { return (yield* presentation.value())?.layout ?? 'desktop'; }, 'data-theme': function* () { return (yield* presentation.value())?.backgroundTheme ?? 'aurora'; }, 'data-background-type': function* () { return (yield* presentation.value())?.backgroundType ?? 'theme'; }, 'data-gradient-start': function* () { return (yield* presentation.value())?.backgroundGradientStart ?? PRESENTATION_THEME_GRADIENTS.aurora.start; }, 'data-gradient-middle': function* () { return (yield* presentation.value())?.backgroundGradientMiddle ?? PRESENTATION_THEME_GRADIENTS.aurora.middle; }, 'data-gradient-end': function* () { return (yield* presentation.value())?.backgroundGradientEnd ?? PRESENTATION_THEME_GRADIENTS.aurora.end; }, 'data-gradient-angle': function* () { return String((yield* presentation.value())?.backgroundGradientAngle ?? PRESENTATION_THEME_GRADIENTS.aurora.angle); }, 'data-decoration': function* () { return (yield* presentation.value())?.backgroundDecoration ?? 'orb'; }, 'data-decoration-color': function* () { return (yield* presentation.value())?.backgroundDecorationColor ?? '#f736e3'; }, 'data-presenter': presenterMode ? 'true' : 'false', role: 'application', 'aria-label': i18n.t('ui.presentation.stage'), tabIndex: 0, *keydown(event) { yield* handleKeydown(event); } }, [
-        // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationMediaUrl validates the protocol and origin.
+        // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationMediaUrl validates the protocol and origin.
         ifNode(hasBackgroundImage, () => img({ class: 'presentation-background-media', src: function* () { return safePresentationMediaUrl((yield* presentation.value())?.backgroundUrl ?? ''); }, alt: '' })),
-        // eslint-disable-next-line craft-ts/no-raw-user-url, craft-ts/require-reactive-template-bindings -- safePresentationMediaUrl validates the protocol and origin.
+        // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationMediaUrl validates the protocol and origin.
         ifNode(hasBackgroundVideo, () => h('video', { class: 'presentation-background-media', src: function* () { return safePresentationMediaUrl((yield* presentation.value())?.backgroundUrl ?? ''); }, autoplay: true, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-hidden': true })),
         div({ class: 'presentation-topbar', 'data-drag-surface': 'topbar' }, presenterMode
           ? [
@@ -952,7 +1128,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               iframe({ title: i18n.t('ui.presentation.linkViewer'), 'data-source': activeLink, loading: 'eager', referrerPolicy: 'no-referrer', sandbox: 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin', allow: 'fullscreen; autoplay; picture-in-picture' }).pipe(embedPresentationLink),
             ]),
           ])),
-          ifNode(hasActiveCodeWorkspace, () => section({ class: 'presentation-code-workspace', 'aria-label': i18n.t('ui.presentation.codeWorkspace') }, [
+          ifNode(hasActiveCodeWorkspace, () => section({ class: 'presentation-code-workspace', 'data-terminal-visible': function* () { return String(yield* terminalVisible()); }, 'data-process-status': function* () { return (yield* demoWorkspaceProcessStatus.value())?.state ?? 'stopped'; }, 'aria-label': i18n.t('ui.presentation.codeWorkspace') }, [
             div({ class: 'presentation-code-workspace__topbar' }, [
               div({ class: 'presentation-code-workspace__heading' }, [
                 span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.codeWorkspaceEyebrow')),
@@ -961,6 +1137,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
               div({ class: 'presentation-link-viewer__actions' }, [
                 button('toggleCodeFiles', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': function* () { return (yield* codeFilesVisible()) ? i18n.t('ui.presentation.hideCodeFiles') : i18n.t('ui.presentation.showCodeFiles'); }, title: function* () { return (yield* codeFilesVisible()) ? i18n.t('ui.presentation.hideCodeFiles') : i18n.t('ui.presentation.showCodeFiles'); }, click: toggleCodeFiles }, i18n.t('ui.presentation.files')),
                 button('toggleCodeWorkspaceSearch', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.searchCode'), click: function* () { if (yield* codeSearchVisible()) yield* codeSearchVisible.hide(); else { yield* codeFilesVisible.show(); yield* codeSearchVisible.show(); } } }, i18n.t('ui.presentation.searchCode')),
+                button('toggleDemoTerminal', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': function* () { return (yield* terminalVisible()) ? i18n.t('ui.presentation.closeDemoTerminal') : i18n.t('ui.presentation.openDemoTerminal'); }, click: toggleDemoTerminal }, function* () { return (yield* terminalVisible()) ? i18n.t('ui.presentation.closeDemoTerminal') : i18n.t('ui.presentation.openDemoTerminal'); }),
                 button('closeCodeWorkspace', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.closeCodeWorkspace'), click: closeCodeWorkspace }, i18n.t('ui.presentation.closeCodeWorkspace')),
               ]),
             ]),
@@ -977,6 +1154,32 @@ function createPresentationPage(name: string, presenterMode: boolean) {
                 pre('workspaceCode', { class: 'presentation-code presentation-code--workspace', 'data-language': function* () { return (yield* selectedWorkspaceFile())?.language ?? 'typescript'; } }, forNode(highlightedWorkspaceCode, { track: (token) => token.id }, (tokenInput) => span({ class: function* () { return (yield* tokenInput()).className; } }, function* () { return (yield* tokenInput()).text; }))),
               ]),
             ]),
+            ifNode(terminalVisible, () => section({ class: 'presentation-demo-terminal', 'aria-label': i18n.t('ui.presentation.demoTerminal'), onDemoWorkspaceProcessRefresh: refreshDemoWorkspaceProcess }, [
+              div({ class: 'presentation-demo-terminal__header' }, [
+                div({ class: 'presentation-demo-terminal__title' }, [
+                  span({ class: 'presentation-stage__kicker' }, i18n.t('ui.presentation.demoTerminalEyebrow')),
+                  span({ class: 'presentation-demo-terminal__status', 'data-status': function* () { return (yield* processStatus()).state; }, 'aria-live': 'polite' }, processStatusLabel),
+                ]),
+                div({ class: 'presentation-demo-terminal__actions' }, [
+                  // eslint-disable-next-line craft-ts/no-raw-user-url -- processUrl only contains the validated local demo origin.
+                  ifNode(processIsRunning, () => a('openLocalDemo', { class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.openLocalDemo'), href: processUrl, target: '_blank', rel: 'noopener noreferrer', 'data-navigation': 'external' }, i18n.t('ui.presentation.openLocalDemo'))),
+                  button('refreshDemoTerminal', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.refreshDemoTerminal'), click: refreshDemoWorkspaceProcess }, i18n.t('ui.presentation.refreshDemoTerminal')),
+                  button('startDemoTerminal', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.startDemo'), disabled: function* () { return (yield* processIsBusy()) || (yield* processIsRunning()); }, click: startDemoWorkspaceProcess }, i18n.t('ui.presentation.startDemo')),
+                  button('stopDemoTerminal', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.stopDemo'), disabled: function* () { return (yield* processIsBusy()) || !(yield* processIsRunning()); }, click: stopDemoWorkspaceProcess }, i18n.t('ui.presentation.stopDemo')),
+                ]),
+              ]),
+              div({ class: 'presentation-demo-terminal__command' }, [
+                span({ class: 'presentation-demo-terminal__prompt', 'aria-hidden': true }, '$'),
+                h('code', {}, function* () { return (yield* processStatus()).command; }),
+                span({ class: 'presentation-demo-terminal__runtime' }, function* () { return (yield* processStatus()).runtime; }),
+              ]),
+              div({ class: 'presentation-demo-terminal__input-row' }, [
+                span({ class: 'presentation-demo-terminal__prompt', 'aria-hidden': true }, '$'),
+                input('demoTerminalCommand', { type: 'text', class: 'presentation-demo-terminal__input', 'aria-label': i18n.t('ui.presentation.demoCommandPlaceholder'), placeholder: i18n.t('ui.presentation.demoCommandPlaceholder'), value: terminalCommand, autocomplete: 'off', spellcheck: false, disabled: function* () { return (yield* terminalIsBusy()) || (yield* processIsBusy()); }, *input(event) { yield* terminalCommand.setCommand((event.target as HTMLInputElement).value); }, *keydown(event) { if (event.key === 'Enter') { event.preventDefault(); yield* runDemoCommand(); } } }),
+                button('runDemoCommand', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.runDemoCommand'), disabled: function* () { return (yield* terminalIsBusy()) || (yield* processIsBusy()); }, click: runDemoCommand }, i18n.t('ui.presentation.runDemoCommand')),
+              ]),
+              pre('demoTerminalOutput', { class: 'presentation-demo-terminal__output', 'aria-live': 'polite' }, function* () { return (yield* processStatus()).logs.join('\n'); }),
+            ]).pipe(pollDemoWorkspaceProcess)),
             ifNode(codeQuickOpenVisible, () => div({ class: 'presentation-code-workspace__quick-open', role: 'dialog', 'aria-label': i18n.t('ui.presentation.quickOpen') }, [
               div({ class: 'presentation-code-workspace__quick-open-card' }, [
                 span({ class: 'presentation-code-workspace__files-title' }, i18n.t('ui.presentation.quickOpen')),
@@ -1081,6 +1284,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
             span({ class: 'studio-panel__label' }, i18n.t('ui.presentation.speakerNotes')),
             div({ class: 'presentation-notes__actions' }, [
               ifNode(hasDemoWorkspace, () => button('openCodeWorkspace', { type: 'button', class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.openCodeWorkspace'), click: openCodeWorkspace }, i18n.t('ui.presentation.openCodeWorkspace'))),
+              ifNode(hasDemoWorkspace, () => button('openDemoTerminal', { type: 'button', class: 'presentation-control presentation-control--primary', 'aria-label': i18n.t('ui.presentation.openDemoTerminal'), click: openDemoTerminal }, i18n.t('ui.presentation.openDemoTerminal'))),
               button('dragSpeakerNotes', { type: 'button', class: 'presentation-notes__drag-handle', 'data-drag-surface': 'notes', 'aria-label': i18n.t('ui.presentation.moveNotes'), title: i18n.t('ui.presentation.moveNotes') }, '↕').pipe(dragPresentationSurface),
             ]),
           ]),
