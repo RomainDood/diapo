@@ -125,6 +125,9 @@ const answer = 42;
     const source = formatPresentationAsMarkdown({
       ...DEFAULT_PRESENTATION,
       id: 'demo',
+      updatedAt: '',
+      durationMinutes: 7,
+      sectionCount: 2,
       demoWorkspaceId: 'default-demo',
       sections: DEFAULT_PRESENTATION.sections.map((section, sectionIndex) => ({
         ...section,
