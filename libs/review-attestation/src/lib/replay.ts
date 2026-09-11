@@ -1,0 +1,156 @@
+/**
+ * Is the replay the thing that was measured?
+ *
+ * The snapshot is only worth showing if what it renders is what was attested.
+ * A missing font, a media query left to re-evaluate, a stylesheet that could
+ * be neither read nor fetched — each of those produces a document that looks
+ * plausible and measures differently, and a reviewer would judge it without
+ * ever knowing.
+ *
+ * So the replay is **checked, not trusted**: re-measure it with the same
+ * collector and compare against the digest the ledger holds. That turns every
+ * fidelity worry into an assertion, and it reuses the code that produced the
+ * evidence in the first place rather than a second opinion about it.
+ *
+ * It is the same discipline the plan imposes on a `visualSeam`: verify by
+ * rendering, not by reading the CSS and believing it.
+ */
+import { digestDelta, formatDelta, type LayoutDigest } from './digest.js';
+
+export interface ReplayFidelity {
+  readonly faithful: boolean;
+  /** Nodes present in one and not the other. */
+  readonly missing: readonly string[];
+  readonly unexpected: readonly string[];
+  /** Same node, different measurement. */
+  readonly moved: readonly string[];
+  /**
+   * One sentence naming what went wrong, in a reviewer's terms.
+   *
+   * Separate from `report`, and it carries the whole message on its own. A
+   * total mismatch used to print "36 nodes are absent" followed by forty
+   * paths — every symptom of one cause, none of them naming it — and a
+   * reviewer cannot act on a list of addresses.
+   */
+  readonly summary: string;
+  /**
+   * The same finding, as data rather than a sentence.
+   *
+   * `summary` is English, and it is thrown by `assertReplayFaithful` where
+   * English is right — a CI failure is read by whoever wrote the code. A
+   * reviewer's screen is not that place, so the surface that has to say this
+   * in the reviewer's language builds its own sentence from this instead of
+   * translating a string it did not write.
+   */
+  readonly reason: FidelityReason;
+  /** The supporting detail, one line each. Empty when the summary suffices. */
+  readonly report: readonly string[];
+}
+
+export type FidelityReason =
+  | { readonly kind: 'faithful' }
+  /** The subject's selector matches nothing in the replay. */
+  | { readonly kind: 'no-root'; readonly root: string }
+  /** Nothing was loaded into the replay at all. */
+  | { readonly kind: 'empty' }
+  /** Attested nodes are not there. */
+  | { readonly kind: 'absent'; readonly count: number }
+  /** The nodes are there and measure differently. */
+  | { readonly kind: 'moved'; readonly count: number };
+
+export interface FidelityOptions {
+  /**
+   * Half-pixel differences to forgive, per box edge.
+   *
+   * Zero by default. A tolerance here is a tolerance on the only question that
+   * matters — "is this the render that was judged" — so it has to be asked for
+   * out loud rather than granted quietly.
+   */
+  readonly tolerance?: number;
+}
+
+/**
+ * Compares a digest measured from the replay against the attested one.
+ *
+ * The attested digest is the second argument on purpose: the replay is what is
+ * on trial, so it reads as "does the replay still say what the evidence said".
+ */
+export function replayFidelity(
+  replayed: LayoutDigest,
+  attested: LayoutDigest,
+  options: FidelityOptions = {},
+): ReplayFidelity {
+  const tolerance = options.tolerance ?? 0;
+  const inReplay = new Set(replayed.nodes.map((node) => node.path));
+  const inAttested = new Set(attested.nodes.map((node) => node.path));
+
+  const missing = [...inAttested].filter((path) => !inReplay.has(path)).sort();
+  const unexpected = [...inReplay].filter((path) => !inAttested.has(path)).sort();
+
+  const deltas = digestDelta(attested, replayed).filter((delta) => {
+    if (!inReplay.has(delta.path) || !inAttested.has(delta.path)) return false;
+    if (tolerance === 0) return true;
+    const before = Number(delta.before);
+    const after = Number(delta.after);
+    if (Number.isNaN(before) || Number.isNaN(after)) return true;
+    return Math.abs(after - before) > tolerance;
+  });
+  const moved = [...new Set(deltas.map((delta) => delta.path))].sort();
+
+  const faithful =
+    missing.length === 0 && unexpected.length === 0 && moved.length === 0;
+
+  // The whole attested set gone means one thing went wrong, not N: the
+  // document on screen is not this component. Listing its nodes would describe
+  // forty symptoms of a single cause.
+  const total = inAttested.size > 0 && missing.length === inAttested.size;
+
+  const reason: FidelityReason = faithful
+    ? { kind: 'faithful' }
+    : missing.length > 0
+      ? { kind: 'absent', count: missing.length }
+      : { kind: 'moved', count: moved.length };
+
+  const summary = faithful
+    ? 'The frozen page measures exactly like the evidence.'
+    : total
+      ? 'None of the attested nodes are in the frozen page. It is showing a different document, or the subject it was captured from is missing from it.'
+      : missing.length > 0
+        ? `${missing.length} of ${inAttested.size} attested nodes are missing from the frozen page — a stylesheet or a script-built element did not survive the capture.`
+        : `${moved.length} node${moved.length === 1 ? '' : 's'} measure${moved.length === 1 ? 's' : ''} differently here than when the evidence was taken.`;
+
+  const report: string[] = [];
+  if (!total) {
+    report.push(
+      ...missing.slice(0, 4).map((path) => `missing: ${path}`),
+      ...unexpected.slice(0, 4).map((path) => `unexpected: ${path}`),
+      ...deltas.slice(0, 6).map((delta) => formatDelta(delta)),
+    );
+  }
+
+  return { faithful, missing, unexpected, moved, summary, reason, report };
+}
+
+/**
+ * Fails when the replay is not the render that was attested.
+ *
+ * For a suite. A review surface should *show* the divergence and fall back to
+ * the screenshot rather than throw — a card that refuses to display anything
+ * is a card that gets approved blind.
+ */
+export function assertReplayFaithful(
+  replayed: LayoutDigest,
+  attested: LayoutDigest,
+  options: FidelityOptions & { readonly subject?: string } = {},
+): void {
+  const fidelity = replayFidelity(replayed, attested, options);
+  if (fidelity.faithful) return;
+  throw new Error(
+    [
+      `assertReplayFaithful: the replay${options.subject ? ` of '${options.subject}'` : ''} is not the render that was measured.`,
+      `  ${fidelity.summary}`,
+      ...fidelity.report.map((line) => `  ${line}`),
+      '  Judging it would record a verdict about a document nobody attested.',
+    ].join('\n'),
+  );
+}

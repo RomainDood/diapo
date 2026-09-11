@@ -267,6 +267,113 @@ Inspect all targets available for a project with:
 npx nx show project craft-ts-core
 ```
 
+### Review a visual change
+
+Visual attestation records a human judgement about a rendering and carries it
+forward until the rendering itself changes. Two caches decide two different
+things, and confusing them is the mistake the system exists to prevent: a code
+fingerprint decides whether to **re-run** a capture, and an evidence hash decides
+whether to **ask a person**. Code that moves without changing the render carries
+its verdict forward; a render that changes goes back to a human.
+
+From the repository root, capture the evidence from the real demo route:
+
+```bash
+npm run attest:visual:capture
+```
+
+The capture starts the demo automatically when `BASE_URL` is not set. It writes
+all the artefacts needed for review into `.craft/runs/`:
+
+- `design-system.json`: the portable visual report;
+- `design-system-*.png`: screenshots;
+- `design-system-*.snapshot.html`: frozen documents used by the reviewer.
+
+To use another report path, set `CRAFT_VISUAL_REPORT` for all commands:
+
+```bash
+CRAFT_VISUAL_REPORT=.craft/runs/my-run.json npm run attest:visual:capture
+```
+
+Check the queue before opening it:
+
+```bash
+npm run attest:visual:status
+```
+
+Then open the visual review application:
+
+```bash
+npm run attest:visual:review
+```
+
+The equivalent source-checkout command, useful when the report is not at the
+default path, is:
+
+```bash
+npx tsx libs/cli/src/bin/craft-ts.ts attest review \
+  --kind visual \
+  --report .craft/runs/design-system.json \
+  --tsconfig apps/demo/tsconfig.graph.json
+```
+
+It serves a queue on `http://127.0.0.1:4320`, one card per decision. Each card
+shows the page as it was measured — a frozen, script-free copy, re-measured on
+your machine and reported if it disagrees with the evidence — beside the
+screenshot. `j`/`k` move, `a` accepts, `n` accepts with a note, `r` rejects.
+
+The review refuses to start when the stored report was written by a different
+collector:
+
+```
+visual report: '…#base' does not contain a layout digest v1.
+```
+
+That means the digest version moved; re-run the capture above and the report is
+current again.
+
+The rest of the command line — what is current, what carried forward, why a
+subject came back, and what moved while belonging to no subject at all:
+
+```bash
+npx tsx libs/cli/src/bin/craft-ts.ts attest --help
+```
+
+The unified Attestation DevTool combines visual captures with template
+obligations. It is the convenient entry point when both kinds of documents
+should be reviewed together:
+
+```bash
+npm run attest:devtools
+```
+
+The review application is itself attestable. Its capture and review run as two
+separate sessions so it never mutates the queue it is currently freezing:
+
+```bash
+npm run attest:review-app:capture
+npm run attest:review-app:status
+npm run attest:review-app:review
+```
+
+See [the attestation application workflow](libs/review-attestation/attestation-app/README.md)
+for the captured states, artefacts, custom report path, and the confirmed
+**Regenerate all evidence** action available inside the DevTool.
+
+Template obligations can also be generated and inspected without a browser
+capture. Their proof objects are stored in `.craft/evidence/`:
+
+```bash
+npm run attest:templates:status
+npx tsx libs/cli/src/bin/craft-ts.ts attest review \
+  --kind template \
+  --tsconfig apps/demo/tsconfig.graph.json
+```
+
+[apps/docs/guide/style/attestation.md](apps/docs/guide/style/attestation.md)
+explains what is attested and why it is a layout digest rather than a
+screenshot.
+
 ### Validate before submitting
 
 Run the same core checks as CI:
