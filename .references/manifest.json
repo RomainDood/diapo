@@ -5,7 +5,7 @@
   "craftTs": {
     "url": "https://github.com/craft-ts/craft-ts.git",
     "requestedRef": "main",
-    "resolvedSha": "f63e426696ab496da17df280331ba900be3f2ba0",
+    "resolvedSha": "cff3d769e17e8662510ce3f303c3b1343ee3ce57",
     "path": ".references/craft-ts"
   },
   "effectTs": {
