@@ -1,8 +1,9 @@
 // Generated. Do not edit.
 export const architectureCatalog = {
   "version": 1,
-  "graphHash": "7b0e264bccd2dbb0",
+  "graphHash": "4f77d29e09aaeb54",
   "routes": [
+    "",
     "editor/:presentationId",
     "feature",
     "present/:presentationId",
@@ -12,7 +13,7 @@ export const architectureCatalog = {
     "PresentationStore"
   ],
   "components": [
-    "AnonymousComponent@659",
+    "AnonymousComponent@createPresentationPage",
     "App",
     "DashboardPage",
     "EditorPage"

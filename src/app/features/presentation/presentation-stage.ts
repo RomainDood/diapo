@@ -669,7 +669,7 @@ function createPresentationPage(name: string, presenterMode: boolean) {
       const slideIndex = yield* state('slideIndex', 0, ({ set }) => ({
         setIndex: (value: number) => set(value),
       }));
-      const notesVisible = yield* state('notesVisible', false, ({ set }) => ({
+      const notesVisible = yield* state('notesVisible', presenterMode, ({ set }) => ({
         show: () => set(true),
         hide: () => set(false),
       }));
@@ -1108,7 +1108,6 @@ function createPresentationPage(name: string, presenterMode: boolean) {
           : [
               a('exitPresentation', { class: 'presentation-control presentation-control--quiet', 'aria-label': i18n.t('ui.presentation.exit'), 'data-navigation': 'external', href: function* () { return `/editor/${yield* presentationId()}`; } }, i18n.t('ui.presentation.exit')),
               span({ class: 'presentation-brand' }, function* () { return (yield* presentation.value())?.title ?? i18n.t('ui.presentation.loading'); }),
-              a('presenterView', { class: 'presentation-control', 'aria-label': i18n.t('ui.presentation.presenterView'), 'data-navigation': 'external', href: function* () { return `/presenter/${yield* presentationId()}`; } }, i18n.t('ui.presentation.presenterView')),
             ]).pipe(dragPresentationSurface),
         ifNode(presentation.isLoading, () => p({ class: 'presentation-loading' }, i18n.t('ui.presentation.loading'))),
         ifNode(overview, () => section({ class: 'presentation-overview', 'data-drag-surface': 'overview', 'data-link-viewer': function* () { return String(yield* hasActiveLink()); }, 'aria-labelledby': 'presentationOverviewTitle' }, [
@@ -1217,39 +1216,35 @@ function createPresentationPage(name: string, presenterMode: boolean) {
           span({ class: 'presentation-code-workspace__shortcut' }, [h('kbd', {}, 'Ctrl/Cmd+B'), span({}, i18n.t('ui.presentation.shortcutFiles'))]),
           span({ class: 'presentation-code-workspace__shortcut' }, [h('kbd', {}, 'Esc'), span({}, i18n.t('ui.presentation.shortcutBack'))]),
         ])),
-        ifNode(showStage, () => section({ class: 'presentation-stage', tabIndex: -1 }, [
-          h('canvas', { class: 'presentation-stage__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
-          div({ class: 'presentation-stage__glow' }),
-          forNode(
-            slideItems,
-            { track: (slide) => slide.id },
-            () => div({ class: 'presentation-stage__slide', 'data-index': function* () { return String(yield* slideIndex()); }, 'data-transition': function* () { return (yield* currentSlide()).transition; }, style: function* () { return assign(presentationSlideVars.phase, num((yield* slideIndex()) % 2)); } }, [
-              span({ class: 'presentation-stage__kicker' }, function* () {
-                return `${String((yield* slideIndex()) + 1).padStart(2, '0')} · ${yield* currentSectionTitle()} · ${yield* currentSectionIntention()}`;
-              }),
-              heading({ class: 'presentation-stage__title', 'aria-label': i18n.t('ui.presentation.currentSlide') }, function* () { return (yield* currentSlide()).title; }),
-              p({ class: 'presentation-stage__message' }, function* () { return (yield* currentSlide()).message; }),
-              // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
-              ifNode(hasImage, () => button('openImageViewer', { type: 'button', class: 'presentation-stage__image-trigger', 'aria-label': i18n.t('ui.presentation.openImageViewer'), title: i18n.t('ui.presentation.openImageViewer'), click: openImageViewer }, img({ class: 'presentation-stage__image', src: function* () { return safePresentationImageUrl((yield* currentSlide()).imageUrl); }, alt: function* () { return (yield* currentSlide()).imageAlt || i18n.t('ui.editor.imageAltFallback'); } }))),
-              ifNode(hasCode, () => pre('slideCode', { class: 'presentation-code', 'data-language': function* () { return (yield* currentSlide()).codeLanguage; } }, forNode(highlightedCode, { track: (token) => token.id }, (tokenInput) => span({ class: function* () { return (yield* tokenInput()).className; } }, function* () { return (yield* tokenInput()).text; })))),
-              h('canvas', { class: 'presentation-annotation-canvas', 'data-annotation-tool': 'pointer', 'data-annotation-active': 'false', 'aria-hidden': true }).pipe(presentationAnnotationCanvas),
-            ]),
-          ),
+        ifNode(showStage, () => div({ class: 'presentation-stage-frame' }, [
+          section({ class: 'presentation-stage', tabIndex: -1 }, [
+            h('canvas', { class: 'presentation-stage__canvas', 'aria-hidden': true }).pipe(threePresentationBackdrop),
+            div({ class: 'presentation-stage__glow' }),
+            forNode(
+              slideItems,
+              { track: (slide) => slide.id },
+              () => div({ class: 'presentation-stage__slide', 'data-index': function* () { return String(yield* slideIndex()); }, 'data-transition': function* () { return (yield* currentSlide()).transition; }, style: function* () { return assign(presentationSlideVars.phase, num((yield* slideIndex()) % 2)); } }, [
+                span({ class: 'presentation-stage__kicker' }, function* () {
+                  return `${String((yield* slideIndex()) + 1).padStart(2, '0')} · ${yield* currentSectionTitle()} · ${yield* currentSectionIntention()}`;
+                }),
+                heading({ class: 'presentation-stage__title', 'aria-label': i18n.t('ui.presentation.currentSlide') }, function* () { return (yield* currentSlide()).title; }),
+                p({ class: 'presentation-stage__message' }, function* () { return (yield* currentSlide()).message; }),
+                // eslint-disable-next-line craft-ts/no-raw-user-url -- safePresentationImageUrl validates and drops blocked origins.
+                ifNode(hasImage, () => button('openImageViewer', { type: 'button', class: 'presentation-stage__image-trigger', 'aria-label': i18n.t('ui.presentation.openImageViewer'), title: i18n.t('ui.presentation.openImageViewer'), click: openImageViewer }, img({ class: 'presentation-stage__image', src: function* () { return safePresentationImageUrl((yield* currentSlide()).imageUrl); }, alt: function* () { return (yield* currentSlide()).imageAlt || i18n.t('ui.editor.imageAltFallback'); } }))),
+                ifNode(hasCode, () => pre('slideCode', { class: 'presentation-code', 'data-language': function* () { return (yield* currentSlide()).codeLanguage; } }, forNode(highlightedCode, { track: (token) => token.id }, (tokenInput) => span({ class: function* () { return (yield* tokenInput()).className; } }, function* () { return (yield* tokenInput()).text; })))),
+                h('canvas', { class: 'presentation-annotation-canvas', 'data-annotation-tool': 'pointer', 'data-annotation-active': 'false', 'aria-hidden': true }).pipe(presentationAnnotationCanvas),
+              ]),
+            ),
+          ]).pipe(focusPresentationStage),
           div({ class: 'presentation-stage__controls' }, [
             button('previousSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.previous'), title: i18n.t('ui.presentation.previous'), class: 'presentation-control presentation-control--icon', disabled: function* () { return (yield* slideIndex()) === 0; }, click: previous }, span({ 'aria-hidden': true }, '←')),
-            div({ class: 'presentation-carousel', role: 'list', 'aria-label': i18n.t('ui.presentation.presentationOutline') }, [
-              forNode(sectionNavigation, { track: (part) => part.id }, (partInput) => [
-                button('carouselSection', { type: 'button', class: 'presentation-carousel__part', 'data-active': function* () { return String((yield* slideIndex()) >= (yield* partInput()).firstSlideIndex && (yield* slideIndex()) < (yield* partInput()).firstSlideIndex + (yield* partInput()).sequences.length); }, click: function* () { yield* selectSlide((yield* partInput()).firstSlideIndex); } }, function* () { return (yield* partInput()).title; }),
-                forNode(function* () { return (yield* partInput()).sequences; }, { track: (sequence) => sequence.id }, (sequenceInput) => button('carouselSequence', { type: 'button', class: 'presentation-carousel__sequence', 'data-active': function* () { return String((yield* sequenceInput()).slideIndex === (yield* slideIndex())); }, click: function* () { yield* selectSlide((yield* sequenceInput()).slideIndex); } }, function* () { return (yield* sequenceInput()).title; })),
-              ]),
-            ]),
             div({ class: 'presentation-progress' }, [
               div({ class: 'presentation-progress__track', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': progressPercent }, div({ class: 'presentation-progress__fill', style: function* () { return assign(presentationProgressVars.value, unit.pct(yield* progressPercent())); } })),
               span(function* () { return `${(yield* slideIndex()) + 1} / ${(yield* slides()).length}`; }),
             ]),
             button('nextSlide', { type: 'button', 'aria-label': i18n.t('ui.presentation.next'), title: i18n.t('ui.presentation.next'), class: 'presentation-control presentation-control--icon', disabled: function* () { return (yield* slideIndex()) >= (yield* slides()).length - 1; }, click: next }, span({ 'aria-hidden': true }, '→')),
           ]),
-        ]).pipe(focusPresentationStage)),
+        ])),
         ifNode(showStage, () => div({ class: 'presentation-annotation-toolbar', role: 'toolbar', 'aria-label': i18n.t('ui.presentation.annotationToolbar') }, [
           button('dragAnnotationToolbar', { type: 'button', class: 'presentation-annotation-toolbar__drag-handle', 'data-drag-surface': 'annotations', 'aria-label': i18n.t('ui.presentation.moveAnnotations'), title: i18n.t('ui.presentation.moveAnnotations') }, '↕').pipe(dragPresentationSurface),
           button('annotationPointer', { type: 'button', class: 'presentation-control presentation-control--icon', 'data-annotation-tool': 'pointer', 'data-active': 'true', 'aria-pressed': true, 'aria-label': i18n.t('ui.presentation.annotationPointer'), 'aria-keyshortcuts': presentationAnnotationShortcuts.pointer, title: annotationActionTitle(i18n.t('ui.presentation.annotationPointer'), 'pointer'), 'data-tooltip': annotationActionTitle(i18n.t('ui.presentation.annotationPointer'), 'pointer') }, '↖'),

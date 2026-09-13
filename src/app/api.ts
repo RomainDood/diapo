@@ -1,4 +1,4 @@
-import { CraftHttpClient, craftUntilSettled, response } from '@craft-ts/core';
+import { CraftHttpClient, craftGen, craftUntilSettled, response } from '@craft-ts/core';
 import type {
   CreatePresentationInput,
   PresentationDocument,
@@ -27,14 +27,12 @@ export type {
   PresentationDemoWorkspaceProcessStatus,
 } from '../shared/presentation';
 
-export function* listPresentations() {
-  const request = yield* CraftHttpClient.get(() => ({
+export const listPresentations = craftGen(function* () {
+  return yield* CraftHttpClient.get(({ response }) => ({
     url: '/api/presentations',
     success: response<readonly PresentationSummary[]>(),
   }));
-  // CraftHttpClient resolves this tracked request in the query runtime.
-  return request as unknown as readonly PresentationSummary[];
-}
+});
 
 export function* loadPresentation(id: string) {
   const request = yield* CraftHttpClient.get(() => ({

@@ -11,6 +11,7 @@ import {
 } from '@craft-ts/core';
 
 export const { appRoutes } = craftRoutes('app', [
+  { path: '', pathMatch: 'full', redirectTo: '/presenter/presentation-angular-route-resources' },
   craftRoute('feature', {
     ...loadCraftComponent(({ withRetry }) =>
       withRetry(import('./features/dashboard/dashboard-page')).then(

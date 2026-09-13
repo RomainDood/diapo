@@ -1,4 +1,5 @@
 {
+  "version": 2,
   "classes": [
     {
       "key": "appSurface-card",
@@ -71,105 +72,165 @@
       "property": "--app-accent",
       "value": "#bab2eb",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0,
+      "provenance": {
+        "palette": "(unnamed)",
+        "group": "accent",
+        "token": "info",
+        "role": "accent",
+        "light": "#5c44e4",
+        "dark": "#bab2eb",
+        "side": "dark"
+      }
     },
     {
       "className": "app-border-3b2b52-f0au4c",
       "property": "--app-border",
       "value": "#3b2b52",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0,
+      "provenance": {
+        "palette": "(unnamed)",
+        "group": "border",
+        "token": "subtle",
+        "role": "border",
+        "light": "#e8dff4",
+        "dark": "#3b2b52",
+        "side": "dark"
+      }
     },
     {
       "className": "app-ink-f8f5ff-0jbutt",
       "property": "--app-ink",
       "value": "#f8f5ff",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0,
+      "provenance": {
+        "palette": "(unnamed)",
+        "group": "text",
+        "token": "strong",
+        "role": "text",
+        "light": "#211632",
+        "dark": "#f8f5ff",
+        "side": "dark"
+      }
     },
     {
       "className": "app-inkMuted-bab2eb-xjac47",
       "property": "--app-inkMuted",
       "value": "#bab2eb",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0,
+      "provenance": {
+        "palette": "(unnamed)",
+        "group": "text",
+        "token": "muted",
+        "role": "text",
+        "light": "#6d627f",
+        "dark": "#bab2eb",
+        "side": "dark"
+      }
     },
     {
       "className": "app-raised-1b1228-i2fvfe",
       "property": "--app-raised",
       "value": "#1b1228",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0,
+      "provenance": {
+        "palette": "(unnamed)",
+        "group": "surface",
+        "token": "raised",
+        "role": "surface",
+        "light": "#ffffff",
+        "dark": "#1b1228",
+        "side": "dark"
+      }
     },
     {
       "className": "background-color-var-app-raised-7id0af",
       "property": "background-color",
       "value": "var(--app-raised)",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "border-color-var-app-border-kpg5zb",
       "property": "border-color",
       "value": "var(--app-border)",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "border-radius-0-375rem-p8cjfv",
       "property": "border-radius",
       "value": "0.375rem",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "border-style-solid-eeub8s",
       "property": "border-style",
       "value": "solid",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "border-width-1px-yhb9pj",
       "property": "border-width",
       "value": "1px",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "color-var-app-accent-a2c7by",
       "property": "color",
       "value": "var(--app-accent)",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "color-var-app-ink-weq9xg",
       "property": "color",
       "value": "var(--app-ink)",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "color-var-app-inkMuted-c8596z",
       "property": "color",
       "value": "var(--app-inkMuted)",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "display-block-m82sn6",
       "property": "display",
       "value": "block",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "padding-1-25rem-76z84q",
       "property": "padding",
       "value": "1.25rem",
       "conditions": [],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 0
     },
     {
       "className": "tone-danger-app-accent-c91558-nntczg",
@@ -178,7 +239,17 @@
       "conditions": [
         "tone:danger"
       ],
-      "unproven": ""
+      "unproven": "",
+      "selectorConditions": 1,
+      "provenance": {
+        "palette": "(unnamed)",
+        "group": "accent",
+        "token": "danger",
+        "role": "accent",
+        "light": "#c91558",
+        "dark": "#ff8ab6",
+        "side": "light"
+      }
     }
   ],
   "vars": [
@@ -187,35 +258,80 @@
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#5c44e4",
-      "role": "accent"
+      "role": "accent",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "accent",
+        "token": "info",
+        "role": "accent",
+        "light": "#5c44e4",
+        "dark": "#bab2eb",
+        "side": "light"
+      }
     },
     {
       "name": "--app-border",
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#e8dff4",
-      "role": "border"
+      "role": "border",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "border",
+        "token": "subtle",
+        "role": "border",
+        "light": "#e8dff4",
+        "dark": "#3b2b52",
+        "side": "light"
+      }
     },
     {
       "name": "--app-ink",
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#211632",
-      "role": "text"
+      "role": "text",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "text",
+        "token": "strong",
+        "role": "text",
+        "light": "#211632",
+        "dark": "#f8f5ff",
+        "side": "light"
+      }
     },
     {
       "name": "--app-inkMuted",
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#6d627f",
-      "role": "text"
+      "role": "text",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "text",
+        "token": "muted",
+        "role": "text",
+        "light": "#6d627f",
+        "dark": "#bab2eb",
+        "side": "light"
+      }
     },
     {
       "name": "--app-raised",
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#ffffff",
-      "role": "surface"
+      "role": "surface",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "surface",
+        "token": "raised",
+        "role": "surface",
+        "light": "#ffffff",
+        "dark": "#1b1228",
+        "side": "light"
+      }
     },
     {
       "name": "--presentationGradient-angle",
@@ -229,21 +345,48 @@
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#5c44e4",
-      "role": "accent"
+      "role": "accent",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "accent",
+        "token": "info",
+        "role": "accent",
+        "light": "#5c44e4",
+        "dark": "#bab2eb",
+        "side": "light"
+      }
     },
     {
       "name": "--presentationGradient-middle",
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#ffffff",
-      "role": "surface"
+      "role": "surface",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "surface",
+        "token": "raised",
+        "role": "surface",
+        "light": "#ffffff",
+        "dark": "#1b1228",
+        "side": "light"
+      }
     },
     {
       "name": "--presentationGradient-start",
       "syntax": "<color>",
       "inherits": true,
       "initialValue": "#fbfaff",
-      "role": "surface"
+      "role": "surface",
+      "initialProvenance": {
+        "palette": "(unnamed)",
+        "group": "surface",
+        "token": "page",
+        "role": "surface",
+        "light": "#fbfaff",
+        "dark": "#100b1b",
+        "side": "light"
+      }
     },
     {
       "name": "--presentationProgress-value",

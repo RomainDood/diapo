@@ -18,9 +18,21 @@ import { PRESENTATION_IMAGE_ALLOWED_ORIGINS } from "../shared/presentation";
 
 const effectProviders = provideLayer(i18nLayer);
 const developmentProviders = import.meta.env.DEV ? provideCraftDevTools() : [];
+function providerDebugName(provider: unknown): string | undefined {
+  if (!provider || typeof provider !== 'object' || Array.isArray(provider) || !('provide' in provider)) return undefined;
+  const token = provider.provide;
+  if (!token || typeof token !== 'object' || !('debugName' in token)) return undefined;
+  return typeof token.debugName === 'string' ? token.debugName : undefined;
+}
+
+// The 0.8.5 send-context HTTP trace adapter leaves CraftHttpClient requests
+// pending. Keep the context UI and other event sources, but omit that adapter
+// so server-backed queries can settle normally.
+const sendContextProviders = provideSendContextToAi().filter((provider) =>
+  providerDebugName(provider) !== 'CRAFT_HTTP_TRACE',
+);
 
 export const appConfig = craftAppConfig({
-  routingDeps: appRoutes.META_PATHS,
   providers: [
     ...developmentProviders,
     provideCraftRootComponent(App),
@@ -36,7 +48,7 @@ export const appConfig = craftAppConfig({
 
     effectProviders,
     provideAppInitializer(() => installCraftEffectBridge()),
-    provideSendContextToAi(),
+    ...sendContextProviders,
   ],
 });
 
