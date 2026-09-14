@@ -855,15 +855,6 @@ export const EditorPage = craftComponent(
           option({ value: 'none' }, i18n.t('ui.editor.demoWorkspaceNone')),
           forNode(demoWorkspaceConfigList, { track: (config) => config.id }, (configInput) => option({ value: function* () { return (yield* configInput()).id; } }, function* () { return (yield* configInput()).title; })),
         ]),
-        div({ class: 'editor-demo-workspace-settings' }, [
-          span({ class: 'studio-panel__label' }, i18n.t('ui.editor.demoWorkspaceAddLabel')),
-          input('newDemoWorkspaceId', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceIdLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceIdPlaceholder'), value: newDemoWorkspaceId, *input(event) { yield* newDemoWorkspaceId.setValue(eventValue(event)); } }),
-          input('newDemoWorkspaceTitle', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceTitleLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceTitlePlaceholder'), value: newDemoWorkspaceTitle, *input(event) { yield* newDemoWorkspaceTitle.setValue(eventValue(event)); } }),
-          input('newDemoWorkspaceDirectory', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceDirectoryLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceDirectoryPlaceholder'), value: newDemoWorkspaceDirectory, *input(event) { yield* newDemoWorkspaceDirectory.setValue(eventValue(event)); } }),
-          input('newDemoWorkspaceCommand', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceCommandLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceCommandPlaceholder'), value: newDemoWorkspaceCommand, *input(event) { yield* newDemoWorkspaceCommand.setValue(eventValue(event)); } }),
-          input('newDemoWorkspacePort', { type: 'number', 'aria-label': i18n.t('ui.editor.demoWorkspacePortLabel'), placeholder: i18n.t('ui.editor.demoWorkspacePortPlaceholder'), value: newDemoWorkspacePort, *input(event) { yield* newDemoWorkspacePort.setValue(eventValue(event)); } }),
-          button('saveLocalDemoWorkspace', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.demoWorkspaceAdd'), click: saveLocalDemoWorkspace }, i18n.t('ui.editor.demoWorkspaceAdd')),
-        ]),
         div({ class: 'editor-background-settings' }, [
           div({ class: 'editor-background-settings__header' }, [
             span({ class: 'studio-panel__label' }, i18n.t('ui.editor.backgroundLabel')),
@@ -927,6 +918,15 @@ export const EditorPage = craftComponent(
             ]),
           ]),
           p({ class: 'editor-background-settings__hint' }, i18n.t('ui.editor.backgroundDecorationHint')),
+        ]),
+        div({ class: 'editor-demo-workspace-settings' }, [
+          span({ class: 'studio-panel__label' }, i18n.t('ui.editor.demoWorkspaceAddLabel')),
+          input('newDemoWorkspaceId', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceIdLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceIdPlaceholder'), value: newDemoWorkspaceId, *input(event) { yield* newDemoWorkspaceId.setValue(eventValue(event)); } }),
+          input('newDemoWorkspaceTitle', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceTitleLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceTitlePlaceholder'), value: newDemoWorkspaceTitle, *input(event) { yield* newDemoWorkspaceTitle.setValue(eventValue(event)); } }),
+          input('newDemoWorkspaceDirectory', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceDirectoryLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceDirectoryPlaceholder'), value: newDemoWorkspaceDirectory, *input(event) { yield* newDemoWorkspaceDirectory.setValue(eventValue(event)); } }),
+          input('newDemoWorkspaceCommand', { type: 'text', 'aria-label': i18n.t('ui.editor.demoWorkspaceCommandLabel'), placeholder: i18n.t('ui.editor.demoWorkspaceCommandPlaceholder'), value: newDemoWorkspaceCommand, *input(event) { yield* newDemoWorkspaceCommand.setValue(eventValue(event)); } }),
+          input('newDemoWorkspacePort', { type: 'number', 'aria-label': i18n.t('ui.editor.demoWorkspacePortLabel'), placeholder: i18n.t('ui.editor.demoWorkspacePortPlaceholder'), value: newDemoWorkspacePort, *input(event) { yield* newDemoWorkspacePort.setValue(eventValue(event)); } }),
+          button('saveLocalDemoWorkspace', { type: 'button', class: 'studio-button studio-button--subtle', 'aria-label': i18n.t('ui.editor.demoWorkspaceAdd'), click: saveLocalDemoWorkspace }, i18n.t('ui.editor.demoWorkspaceAdd')),
         ]),
         input('presentationAudience', { type: 'text', 'aria-label': i18n.t('ui.editor.audiencePlaceholder'), class: 'editor-audience-input', placeholder: i18n.t('ui.editor.audiencePlaceholder'), value: function* () { return (yield* currentDocument()).audience; }, *input(event) { yield* updateAudience(eventValue(event)); } }),
         textarea('presentationObjective', { 'aria-label': i18n.t('ui.editor.objectivePlaceholder'), class: 'editor-objective-input', placeholder: i18n.t('ui.editor.objectivePlaceholder'), value: function* () { return (yield* currentDocument()).objective; }, *input(event) { yield* updateObjective(eventValue(event)); } }),

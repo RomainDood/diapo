@@ -70,8 +70,6 @@ export const baseCatalog = defineCatalog({
       createTitle: msg`Start with the subject`,
       createBody: msg`You can refine the outline, notes and timing after creation.`,
       titlePlaceholder: msg`Presentation title`,
-      audiencePlaceholder: msg`Audience`,
-      objectivePlaceholder: msg`Main objective`,
       createButton: msg`Create subject`,
       creating: msg`Creating…`,
       libraryLabel: msg`YOUR LIBRARY`,

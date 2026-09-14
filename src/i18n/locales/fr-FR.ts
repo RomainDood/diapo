@@ -70,8 +70,6 @@ export const frFR = defineLocaleLike(enUS, 'fr-FR', {
       createTitle: msg`Commencer par le sujet`,
       createBody: msg`Vous pourrez ensuite affiner le plan, les notes et le minutage.`,
       titlePlaceholder: msg`Titre de la présentation`,
-      audiencePlaceholder: msg`Public`,
-      objectivePlaceholder: msg`Objectif principal`,
       createButton: msg`Créer le sujet`,
       creating: msg`Création…`,
       libraryLabel: msg`VOTRE BIBLIOTHÈQUE`,

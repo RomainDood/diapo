@@ -37,8 +37,6 @@ export const DashboardPage = craftComponent(
   function* () {
     const draft = yield* state('newPresentationDraft', EMPTY_DRAFT, ({ update }) => ({
       setTitle: (title: string) => update((current) => ({ ...current, title })),
-      setAudience: (audience: string) => update((current) => ({ ...current, audience })),
-      setObjective: (objective: string) => update((current) => ({ ...current, objective })),
     }));
     const create = yield* mutation('createPresentation', {
       method: (input: CreatePresentationInput) => input,
@@ -90,20 +88,6 @@ export const DashboardPage = craftComponent(
             placeholder: i18n.t('ui.dashboard.titlePlaceholder'),
             value: function* () { return (yield* draft()).title; },
             *input(event) { yield* draft.setTitle(eventValue(event)); },
-          }),
-          input('newPresentationAudience', {
-            type: 'text',
-            'aria-label': i18n.t('ui.dashboard.audiencePlaceholder'),
-            placeholder: i18n.t('ui.dashboard.audiencePlaceholder'),
-            value: function* () { return (yield* draft()).audience; },
-            *input(event) { yield* draft.setAudience(eventValue(event)); },
-          }),
-          input('newPresentationObjective', {
-            type: 'text',
-            'aria-label': i18n.t('ui.dashboard.objectivePlaceholder'),
-            placeholder: i18n.t('ui.dashboard.objectivePlaceholder'),
-            value: function* () { return (yield* draft()).objective; },
-            *input(event) { yield* draft.setObjective(eventValue(event)); },
           }),
           button(
             'createPresentation',
